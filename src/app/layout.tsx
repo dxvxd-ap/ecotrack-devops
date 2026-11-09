@@ -3,7 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "EcoRuta - Sistema de Gestión Logística y Rutas de Residuos",
+  title: "EcoTrack - Sistema de Gestión Logística y Rutas de Residuos",
   description:
     "Plataforma inteligente para la administración de rutas de recolección, telemetría de camiones, calendario logístico y alertas en tiempo real al ciudadano.",
 };

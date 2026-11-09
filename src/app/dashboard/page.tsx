@@ -70,7 +70,7 @@ export default function PaginaResumenDashboard() {
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-blue-400 mb-1">
             <Radio className="w-3.5 h-3.5 animate-pulse" />
-            <span>CENTRO DE CONTROL // ECORUTA LOGÍSTICA</span>
+            <span>CENTRO DE CONTROL // ECOTRACK LOGÍSTICA</span>
           </div>
           <h1 className="texto-anton text-3xl tracking-wide text-white">
             PANEL DE OPERACIONES URBANAS

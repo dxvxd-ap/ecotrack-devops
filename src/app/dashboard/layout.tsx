@@ -31,7 +31,7 @@ export default function DisenoDashboard({
               </div>
               <div>
                 <span className="texto-anton text-lg tracking-wider text-white">
-                  ECORUTA
+                  ECOTRACK
                 </span>
                 <span className="block text-[9px] font-mono text-zinc-400 tracking-wider">
                   DASHBOARD OPERATIVO

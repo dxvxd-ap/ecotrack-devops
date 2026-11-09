@@ -9,7 +9,7 @@ export default function PaginaIniciarSesion() {
             E
           </div>
           <h1 className="texto-anton text-2xl tracking-wide text-zinc-900">
-            ECORUTA DASHBOARD
+            ECOTRACK DASHBOARD
           </h1>
           <p className="text-xs text-zinc-500 font-sans mt-1">
             Plataforma centralizada de gestión logística y rutas
