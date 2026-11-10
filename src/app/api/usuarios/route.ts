@@ -126,20 +126,47 @@ export async function PUT(peticion: NextRequest) {
           },
         });
       } catch (err_clerk: any) {
-        console.warn("Aviso al actualizar en Clerk:", err_clerk.message);
+        console.warn("Aviso al actualizar en Clerk por ID:", err_clerk.message);
+      }
+    } else if (correo_electronico) {
+      // Si no tenemos ID de Clerk directo pero sí correo, buscar en Clerk y actualizar si existe
+      try {
+        const busqueda_clerk = await cliente_clerk.users.getUserList({
+          emailAddress: [correo_electronico.toLowerCase()],
+        });
+        if (busqueda_clerk.data.length > 0) {
+          const u_clerk = busqueda_clerk.data[0];
+          await cliente_clerk.users.updateUser(u_clerk.id, {
+            publicMetadata: {
+              rol: rol_limpio,
+              acceso_dashboard: tiene_acceso,
+            },
+          });
+        }
+      } catch (err_busqueda: any) {
+        console.warn("Aviso al buscar y actualizar Clerk por correo:", err_busqueda.message);
       }
     }
 
-    // 2. Si es una preasignación por correo
+    // 2. Si es una preasignación por correo, actualizar en almacén local y MongoDB
     if (correo_electronico) {
+      const correo_fmt = correo_electronico.toLowerCase();
       const almacen = leer_almacen_local();
       const p = (almacen.preasignaciones || []).find(
-        (item: any) => item.correo_electronico.toLowerCase() === correo_electronico.toLowerCase()
+        (item: any) => item.correo_electronico.toLowerCase() === correo_fmt
       );
       if (p) {
         p.rol_asignado = rol_limpio;
         guardar_almacen_local(almacen);
       }
+
+      try {
+        await conectar_base_datos();
+        await ModeloPreasignacionUsuario.findOneAndUpdate(
+          { correo_electronico: correo_fmt },
+          { rol_asignado: rol_limpio }
+        );
+      } catch (e_db_up) {}
     }
 
     return NextResponse.json({

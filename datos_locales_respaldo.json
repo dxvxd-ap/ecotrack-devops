@@ -571,5 +571,14 @@
       "notas": "vnnfdn"
     }
   ],
-  "preasignaciones": []
+  "preasignaciones": [
+    {
+      "_id": "pre_1794326315320",
+      "correo_electronico": "itslacia@gmail.com",
+      "nombre_completo": "ACG",
+      "rol_asignado": "superadmin",
+      "completado": false,
+      "fecha_creacion": "2026-11-10T15:58:35.320Z"
+    }
+  ]
 }

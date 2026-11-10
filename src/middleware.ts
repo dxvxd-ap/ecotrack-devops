@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { createClerkClient } from "@clerk/backend";
 import { NextResponse } from "next/server";
 
 const es_ruta_dashboard = createRouteMatcher(["/dashboard(.*)"]);
@@ -36,14 +37,32 @@ export default clerkMiddleware(async (auth, peticion) => {
       return NextResponse.next();
     }
 
-    // 2. Extraer el rol de los metadatos públicos de Clerk
+    // 2. Extraer el rol de los metadatos de sesión (sessionClaims)
     const metadatos =
       (sessionClaims?.metadata as Record<string, any>) ||
       (sessionClaims?.publicMetadata as Record<string, any>) ||
       (sessionClaims?.public_metadata as Record<string, any>) ||
       {};
 
-    const rol_usuario = (metadatos.rol as string) || "ciudadano";
+    let rol_usuario = (metadatos.rol as string) || "";
+
+    // 3. Respaldo directo: Si los claims de sesión aún no tienen el rol (p. ej. token recién emitido antes de configurar JWT template o sesión no refrescada), consultar el usuario directamente vía Clerk Backend
+    if (!rol_usuario && process.env.CLERK_SECRET_KEY) {
+      try {
+        const cliente_clerk = createClerkClient({
+          secretKey: process.env.CLERK_SECRET_KEY,
+        });
+        const usuario = await cliente_clerk.users.getUser(userId);
+        const meta_directa = (usuario.publicMetadata as Record<string, any>) || {};
+        rol_usuario = (meta_directa.rol as string) || "ciudadano";
+      } catch (err: any) {
+        console.warn("Aviso al verificar usuario en Clerk dentro de middleware:", err?.message);
+      }
+    }
+
+    if (!rol_usuario) {
+      rol_usuario = "ciudadano";
+    }
 
     // Si el rol no tiene acceso al dashboard, redirigir a acceso denegado
     if (!ROLES_CON_ACCESO_DASHBOARD.includes(rol_usuario.toLowerCase())) {
