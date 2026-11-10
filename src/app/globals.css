@@ -56,3 +56,11 @@ body {
   background-color: #2f63ff !important;
 }
 
+/* Ocultar / recolocar badge flotante de desarrollo de Next.js */
+nextjs-portal,
+[data-nextjs-toast],
+[data-nextjs-dialog-overlay] {
+  margin-bottom: 70px !important;
+}
+
+

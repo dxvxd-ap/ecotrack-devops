@@ -65,8 +65,8 @@
             20.446788
           ],
           [
-            -97.08807,
-            20.446733
+            -97.088368,
+            20.446521
           ]
         ]
       },
@@ -74,7 +74,8 @@
       "distancia_estimada_km": 0.5,
       "duracion_estimada_min": 6,
       "activa": true,
-      "fecha_creacion": "2026-11-03T21:43:39.108Z"
+      "fecha_creacion": "2026-11-03T21:43:39.108Z",
+      "fecha_actualizacion": "2026-11-10T17:19:17.633Z"
     }
   ],
   "camiones": [
@@ -579,14 +580,6 @@
       "rol_asignado": "superadmin",
       "completado": false,
       "fecha_creacion": "2026-11-10T16:15:30.789Z"
-    },
-    {
-      "_id": "pre_1794326315320",
-      "correo_electronico": "itslacia@gmail.com",
-      "nombre_completo": "ACG",
-      "rol_asignado": "superadmin",
-      "completado": true,
-      "fecha_creacion": "2026-11-10T15:58:35.320Z"
     }
   ]
 }
