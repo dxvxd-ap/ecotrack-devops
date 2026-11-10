@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   Navigation,
   Route as IconoRuta,
+  Edit2,
+  X,
 } from "lucide-react";
 
 // Importar mapa dinámicamente sin SSR para Leaflet
@@ -64,6 +66,9 @@ export default function PaginaGestionRutas() {
   const [id_ruta, fijar_id_ruta] = useState("");
   const [descripcion_ruta, fijar_descripcion_ruta] = useState("");
   const [color_seleccionado, fijar_color_seleccionado] = useState("#2f63ff");
+
+  // Estado de edición de ruta existente
+  const [ruta_en_edicion, fijar_ruta_en_edicion] = useState<any>(null);
 
   const colores_disponibles = [
     { nombre: "Cobalto", hex: "#2f63ff" },
@@ -119,7 +124,36 @@ export default function PaginaGestionRutas() {
     fijar_nombre_ruta("");
     fijar_id_ruta("");
     fijar_descripcion_ruta("");
+    fijar_color_seleccionado("#2f63ff");
+    fijar_ruta_en_edicion(null);
     fijar_modo_dibujo(false);
+  };
+
+  const iniciar_edicion_ruta = (r: any) => {
+    fijar_ruta_en_edicion(r);
+    fijar_id_ruta(r.id_ruta || "");
+    fijar_nombre_ruta(r.nombre || "");
+    fijar_descripcion_ruta(r.descripcion || "");
+    fijar_color_seleccionado(r.color_mapa || "#2f63ff");
+
+    // Convertir de GeoJSON [lon, lat] a [lat, lon] para Leaflet
+    if (r.trazado_geojson?.coordinates && Array.isArray(r.trazado_geojson.coordinates)) {
+      const coords_lat_lng: [number, number][] = r.trazado_geojson.coordinates.map(
+        ([lon, lat]: [number, number]) => [lat, lon]
+      );
+      fijar_coordenadas_detalle(coords_lat_lng);
+      // Para puntos clave, usar el inicio y fin o una muestra representativa
+      if (coords_lat_lng.length > 0) {
+        fijar_puntos_clave([
+          coords_lat_lng[0],
+          ...(coords_lat_lng.length > 2 ? [coords_lat_lng[Math.floor(coords_lat_lng.length / 2)]] : []),
+          coords_lat_lng[coords_lat_lng.length - 1],
+        ]);
+      }
+    }
+
+    fijar_modo_dibujo(true);
+    fijar_mensaje_notificacion(`Modo edición activado para "${r.nombre}". Puedes ajustar puntos en el mapa o editar los datos.`);
   };
 
   const guardar_nueva_ruta = async (e: React.FormEvent) => {
@@ -138,6 +172,7 @@ export default function PaginaGestionRutas() {
       const coordenadas_geojson = coordenadas_detalle.map(([lat, lon]) => [lon, lat]);
 
       const payload = {
+        _id: ruta_en_edicion?._id,
         id_ruta: id_ruta.trim() || `RUTA-GZ-${Date.now().toString().slice(-4)}`,
         nombre: nombre_ruta.trim(),
         descripcion: descripcion_ruta.trim(),
@@ -150,22 +185,27 @@ export default function PaginaGestionRutas() {
         duracion_estimada_min: Math.round(distancia_calculada_km * 12),
       };
 
+      const es_edicion = Boolean(ruta_en_edicion);
       const respuesta = await fetch("/api/rutas", {
-        method: "POST",
+        method: es_edicion ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
       const resultado = await respuesta.json();
       if (resultado.exito) {
-        fijar_mensaje_notificacion("¡Ruta adaptada a las calles y registrada exitosamente!");
+        fijar_mensaje_notificacion(
+          es_edicion
+            ? "¡Ruta actualizada exitosamente con su nuevo trazado y datos!"
+            : "¡Ruta adaptada a las calles y registrada exitosamente!"
+        );
         limpiar_trazado_actual();
         cargar_rutas();
       } else {
         alert(resultado.mensaje || "Error al guardar la ruta");
       }
     } catch (error) {
-      alert("Error al registrar la ruta");
+      alert("Error al procesar la ruta");
     } finally {
       fijar_guardando(false);
     }
@@ -281,14 +321,26 @@ export default function PaginaGestionRutas() {
         <div className="lg:col-span-4 space-y-6">
           {modo_dibujo ? (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-5">
-              <div className="border-b border-zinc-800 pb-3">
-                <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest flex items-center gap-1.5">
-                  <IconoRuta className="w-3.5 h-3.5" />
-                  <span>Enrutamiento Activo</span>
-                </span>
-                <h2 className="texto-anton text-lg tracking-wide text-white mt-1">
-                  GUARDAR RUTA VIAL
-                </h2>
+              <div className="border-b border-zinc-800 pb-3 flex items-center justify-between">
+                <div>
+                  <span className={`text-[10px] font-mono uppercase tracking-widest flex items-center gap-1.5 ${
+                    ruta_en_edicion ? "text-amber-400" : "text-emerald-400"
+                  }`}>
+                    <IconoRuta className="w-3.5 h-3.5" />
+                    <span>{ruta_en_edicion ? "Actualizando Ruta Existente" : "Enrutamiento Activo"}</span>
+                  </span>
+                  <h2 className="texto-anton text-lg tracking-wide text-white mt-1">
+                    {ruta_en_edicion ? `EDITAR: ${ruta_en_edicion.nombre}` : "GUARDAR RUTA VIAL"}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={limpiar_trazado_actual}
+                  className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+                  title="Cancelar y cerrar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
               <form onSubmit={guardar_nueva_ruta} className="space-y-4 text-xs font-sans">
@@ -302,8 +354,16 @@ export default function PaginaGestionRutas() {
                     onChange={(e) => fijar_id_ruta(e.target.value)}
                     placeholder="Ej: RUTA-GZ-GALEANA"
                     required
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white font-mono uppercase focus:outline-none focus:border-blue-500"
+                    disabled={Boolean(ruta_en_edicion)}
+                    className={`w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white font-mono uppercase focus:outline-none focus:border-blue-500 ${
+                      ruta_en_edicion ? "opacity-60 cursor-not-allowed" : ""
+                    }`}
                   />
+                  {ruta_en_edicion && (
+                    <span className="text-[10px] text-zinc-500 font-mono mt-0.5 block">
+                      El código de ruta no es editable.
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -370,10 +430,20 @@ export default function PaginaGestionRutas() {
                 <button
                   type="submit"
                   disabled={guardando || coordenadas_detalle.length < 2}
-                  className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-mono font-semibold py-3 px-4 rounded-xl transition-all shadow-md text-xs uppercase"
+                  className={`w-full flex items-center justify-center gap-2 disabled:opacity-50 text-white font-mono font-semibold py-3 px-4 rounded-xl transition-all shadow-md text-xs uppercase ${
+                    ruta_en_edicion
+                      ? "bg-amber-600 hover:bg-amber-500"
+                      : "bg-emerald-600 hover:bg-emerald-500"
+                  }`}
                 >
                   <Save className="w-4 h-4" />
-                  <span>{guardando ? "Guardando..." : "Guardar Ruta"}</span>
+                  <span>
+                    {guardando
+                      ? "Guardando..."
+                      : ruta_en_edicion
+                      ? "Guardar Cambios de la Ruta"
+                      : "Guardar Ruta"}
+                  </span>
                 </button>
               </form>
             </div>
@@ -406,13 +476,23 @@ export default function PaginaGestionRutas() {
                             {r.nombre || "Ruta sin nombre"}
                           </span>
                         </div>
-                        <button
-                          onClick={() => eliminar_ruta(r._id)}
-                          className="text-zinc-500 hover:text-rose-400 transition-colors p-1"
-                          title="Eliminar ruta"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => iniciar_edicion_ruta(r)}
+                            className="inline-flex items-center gap-1 text-[11px] font-mono text-blue-400 hover:text-white px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors border border-zinc-700"
+                            title="Editar ruta y modificar trazado"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Editar</span>
+                          </button>
+                          <button
+                            onClick={() => eliminar_ruta(r._id)}
+                            className="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors p-1 rounded-lg"
+                            title="Eliminar ruta"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="text-[11px] text-zinc-400 line-clamp-2">

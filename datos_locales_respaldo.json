@@ -573,11 +573,19 @@
   ],
   "preasignaciones": [
     {
+      "_id": "pre_1794327330789",
+      "correo_electronico": "23610002@utgz.edu.mx",
+      "nombre_completo": "David Atzin Pérez",
+      "rol_asignado": "superadmin",
+      "completado": false,
+      "fecha_creacion": "2026-11-10T16:15:30.789Z"
+    },
+    {
       "_id": "pre_1794326315320",
       "correo_electronico": "itslacia@gmail.com",
       "nombre_completo": "ACG",
       "rol_asignado": "superadmin",
-      "completado": false,
+      "completado": true,
       "fecha_creacion": "2026-11-10T15:58:35.320Z"
     }
   ]
