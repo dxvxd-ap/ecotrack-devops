@@ -72,26 +72,37 @@ export async function POST() {
       }
     } catch (e) {}
 
-    // Determinación del rol final
+    // Determinación del rol final respetando el rol que el usuario ya tenga asignado
+    const metadatos_actuales = (usuario_clerk.publicMetadata as Record<string, any>) || {};
+    const rol_existente = metadatos_actuales.rol;
+
     let rol_asignado = "ciudadano";
     if (es_admin_fundador) {
       rol_asignado = "superadmin";
+    } else if (rol_existente && rol_existente !== "ciudadano") {
+      // Si el usuario ya tiene un rol administrativo o personalizado asignado en Clerk, ¡NO sobrescribirlo!
+      rol_asignado = rol_existente;
     } else if (rol_preasignado) {
       rol_asignado = rol_preasignado;
+    } else if (rol_existente) {
+      rol_asignado = rol_existente;
     }
 
     const tiene_acceso_dashboard = ["superadmin", "admin", "secretario", "moderador"].includes(rol_asignado);
 
-    // Actualizar metadatos en Clerk para que el token de sesión lo tenga siempre
-    try {
-      await cliente_clerk.users.updateUser(usuario_clerk.id, {
-        publicMetadata: {
-          rol: rol_asignado,
-          acceso_dashboard: tiene_acceso_dashboard,
-        },
-      });
-    } catch (e_clerk: any) {
-      console.warn("Aviso al sincronizar metadatos con Clerk:", e_clerk.message);
+    // Solo actualizar metadatos en Clerk si cambiaron para no hacer peticiones innecesarias
+    if (metadatos_actuales.rol !== rol_asignado || metadatos_actuales.acceso_dashboard !== tiene_acceso_dashboard) {
+      try {
+        await cliente_clerk.users.updateUser(usuario_clerk.id, {
+          publicMetadata: {
+            ...metadatos_actuales,
+            rol: rol_asignado,
+            acceso_dashboard: tiene_acceso_dashboard,
+          },
+        });
+      } catch (e_clerk: any) {
+        console.warn("Aviso al sincronizar metadatos con Clerk:", e_clerk.message);
+      }
     }
 
     // Guardar o actualizar en base de datos
