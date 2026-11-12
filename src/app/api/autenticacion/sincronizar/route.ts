@@ -1,142 +1,78 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
-import { createClerkClient } from "@clerk/backend";
-import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloUsuario } from "@/modelos/Usuario";
 import { ModeloPreasignacionUsuario } from "@/modelos/PreasignacionUsuario";
-import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
-import { sembrar_datos_iniciales_si_esta_vacio } from "@/lib/inicializar_datos";
-
-const cliente_clerk = createClerkClient({
-  secretKey: process.env.CLERK_SECRET_KEY,
-  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-});
-
-const CORREOS_SUPERADMIN = [
-  "22610282@utgz.edu.mx",
-  process.env.ADMIN_CORREO,
-].filter(Boolean);
+import { con_bloqueo_cuenta, claves_cuenta } from "@/lib/usuarios_administrativos";
+import { identidad_autenticada, estado_cuenta, correo_principal, es_fundador_verificado,
+  validar_identidad_fundadora, rol_efectivo, ROLES_CONOCIDOS, ErrorAdministrativo,
+  cliente_clerk_administrativo, respuesta_error_administrativo } from "@/lib/autorizacion";
 
 export async function POST() {
   try {
-    try {
-      await conectar_base_datos();
-      await sembrar_datos_iniciales_si_esta_vacio();
-    } catch (error_bd: any) {
-      console.warn("Aviso de conexión a base de datos en sincronización:", error_bd.message);
-    }
-
-    const usuario_clerk = await currentUser();
-
-    if (!usuario_clerk) {
-      return NextResponse.json(
-        { exito: false, mensaje: "No hay sesión activa de usuario" },
-        { status: 401 }
-      );
-    }
-
-    const correo_principal =
-      usuario_clerk.emailAddresses[0]?.emailAddress?.toLowerCase() || "sin_correo@ecoruta.local";
-    const nombre =
-      [usuario_clerk.firstName, usuario_clerk.lastName].filter(Boolean).join(" ") ||
-      usuario_clerk.username ||
-      "Usuario EcoRuta";
-
-    // 1. Verificar si es el superadministrador fundador
-    const es_admin_fundador =
-      CORREOS_SUPERADMIN.includes(correo_principal) ||
-      usuario_clerk.id === "user_3JzRT8FQJPrqKEfk2QdjZpFaRVN";
-
-    // 2. Verificar si el correo tenía una preasignación previa de rol en el dashboard
-    let rol_preasignado: string | null = null;
-    const almacen = leer_almacen_local();
-    const pre_local = (almacen.preasignaciones || []).find(
-      (p: any) => p.correo_electronico.toLowerCase() === correo_principal
-    );
-    if (pre_local) {
-      rol_preasignado = pre_local.rol_asignado;
-      pre_local.completado = true;
-      guardar_almacen_local(almacen);
-    }
-
-    try {
-      await conectar_base_datos();
-      const pre_db = await ModeloPreasignacionUsuario.findOne({
-        correo_electronico: correo_principal,
-      });
-      if (pre_db) {
-        rol_preasignado = pre_db.rol_asignado;
-        pre_db.completado = true;
-        pre_db.fecha_registro_completado = new Date();
-        await pre_db.save();
+    const identidad = await identidad_autenticada();
+    return await con_bloqueo_cuenta(claves_cuenta(identidad), async () => {
+      // Releer dentro del mismo bloqueo que administración. Ningún dato previo
+      // al bloqueo decide rol, estado activo o consumo de preasignaciones.
+      const usuario = await identidad_autenticada(identidad.id);
+      if (JSON.stringify(claves_cuenta(usuario)) !== JSON.stringify(claves_cuenta(identidad))) {
+        throw new ErrorAdministrativo(409, "La identidad cambió; vuelve a intentarlo");
       }
-    } catch (e) {}
-
-    // Determinación del rol final respetando el rol que el usuario ya tenga asignado
-    const metadatos_actuales = (usuario_clerk.publicMetadata as Record<string, any>) || {};
-    const rol_existente = metadatos_actuales.rol;
-
-    let rol_asignado = "ciudadano";
-    if (es_admin_fundador) {
-      rol_asignado = "superadmin";
-    } else if (rol_existente && rol_existente !== "ciudadano") {
-      // Si el usuario ya tiene un rol administrativo o personalizado asignado en Clerk, ¡NO sobrescribirlo!
-      rol_asignado = rol_existente;
-    } else if (rol_preasignado) {
-      rol_asignado = rol_preasignado;
-    } else if (rol_existente) {
-      rol_asignado = rol_existente;
-    }
-
-    const tiene_acceso_dashboard = ["superadmin", "admin", "secretario", "moderador"].includes(rol_asignado);
-
-    // Solo actualizar metadatos en Clerk si cambiaron para no hacer peticiones innecesarias
-    if (metadatos_actuales.rol !== rol_asignado || metadatos_actuales.acceso_dashboard !== tiene_acceso_dashboard) {
-      try {
-        await cliente_clerk.users.updateUser(usuario_clerk.id, {
-          publicMetadata: {
-            ...metadatos_actuales,
-            rol: rol_asignado,
-            acceso_dashboard: tiene_acceso_dashboard,
-          },
-        });
-      } catch (e_clerk: any) {
-        console.warn("Aviso al sincronizar metadatos con Clerk:", e_clerk.message);
+      const principal = correo_principal(usuario);
+      if (!principal || principal.verification?.status !== "verified") throw new ErrorAdministrativo(403, "Se requiere un correo principal verificado");
+      const correo = principal.emailAddress.toLowerCase();
+      const fundador = es_fundador_verificado(usuario);
+      validar_identidad_fundadora(usuario);
+      const registro = await estado_cuenta(usuario, true);
+      const por_correo = await ModeloUsuario.findOne({ correo_electronico: correo });
+      if ((por_correo && por_correo.id_clerk !== usuario.id) ||
+          (registro && registro.correo_electronico.toLowerCase() !== correo)) {
+        throw new ErrorAdministrativo(409, "La identidad persistida requiere conciliación");
       }
-    }
-
-    // Guardar o actualizar en base de datos
-    try {
-      await conectar_base_datos();
-      await ModeloUsuario.findOneAndUpdate(
-        { id_clerk: usuario_clerk.id },
-        {
-          nombre_completo: nombre,
-          correo_electronico: correo_principal,
-          rol: rol_asignado,
-          activo: true,
-          fecha_actualizacion: new Date(),
-        },
-        { upsert: true, new: true }
-      );
-    } catch (e) {}
-
-    return NextResponse.json({
-      exito: true,
-      mensaje: "Usuario sincronizado correctamente",
-      datos: {
-        id_clerk: usuario_clerk.id,
-        nombre,
-        correo: correo_principal,
-        rol: rol_asignado,
-        tiene_acceso_dashboard,
-      },
+      const rol_clerk = rol_efectivo(usuario);
+      if (!ROLES_CONOCIDOS.includes(rol_clerk)) throw new ErrorAdministrativo(403, "Rol desconocido");
+      if (registro && registro.rol !== rol_clerk) {
+        throw new ErrorAdministrativo(409, "Los roles requieren conciliación; sincronizar no restaura privilegios");
+      }
+      const pre = !registro ? await ModeloPreasignacionUsuario.findOne({ correo_electronico: correo, completado: false }) : null;
+      const consumir = Boolean(pre && pre.completado === false);
+      let rol = fundador ? "superadmin" : rol_clerk;
+      if (consumir && !fundador) {
+        if (!ROLES_CONOCIDOS.includes(pre!.rol_asignado)) throw new ErrorAdministrativo(403, "Preasignación con rol desconocido");
+        // Una cuenta ya privilegiada de Clerk no se degrada por una invitación antigua.
+        if (rol_clerk === "ciudadano") rol = pre!.rol_asignado;
+        else if (pre!.rol_asignado !== rol_clerk) throw new ErrorAdministrativo(409, "Preasignación incompatible con la cuenta");
+      }
+      const nombre = [usuario.firstName, usuario.lastName].filter(Boolean).join(" ") || "Usuario EcoTrack";
+      const acceso = ["superadmin", "admin", "secretario", "moderador"].includes(rol);
+      return async () => {
+        // Consumir antes de conceder. Si algo falla después, el bloqueo persiste
+        // hasta reconciliación; no se reintenta una concesión de resultado incierto.
+        if (consumir) {
+          const consumida = await ModeloPreasignacionUsuario.findOneAndUpdate(
+            { correo_electronico: correo, completado: false, rol_asignado: pre!.rol_asignado },
+            { $set: { completado: true, fecha_registro_completado: new Date() } }, { new: true });
+          if (!consumida) throw new ErrorAdministrativo(409, "La preasignación cambió; requiere conciliación");
+        }
+        if (usuario.publicMetadata.rol !== rol || usuario.publicMetadata.acceso_dashboard !== acceso) {
+          try {
+            await cliente_clerk_administrativo().users.updateUser(usuario.id, {
+              publicMetadata: { ...usuario.publicMetadata, rol, acceso_dashboard: acceso },
+            });
+          } catch (error) {
+            const status = (error as { status?: number; response?: { status?: number } }).status
+              || (error as { response?: { status?: number } }).response?.status;
+            console.error("[Clerk] sincronizar.updateUser", { status, code: (error as { code?: string }).code, name: (error as Error).name });
+            throw error;
+          }
+        }
+        await ModeloUsuario.findOneAndUpdate({ id_clerk: usuario.id }, {
+          $set: { nombre_completo: nombre, correo_electronico: correo, rol, fecha_actualizacion: new Date() },
+          $setOnInsert: { activo: true },
+        }, { upsert: true, new: true, runValidators: true });
+        return NextResponse.json({ exito: true, mensaje: "Usuario sincronizado correctamente",
+          datos: { id_clerk: usuario.id, nombre, correo, rol, tiene_acceso_dashboard: acceso } });
+      };
     });
-  } catch (error: any) {
-    console.error("Error al sincronizar usuario:", error);
-    return NextResponse.json(
-      { exito: false, mensaje: "Error interno del servidor", detalle: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }
