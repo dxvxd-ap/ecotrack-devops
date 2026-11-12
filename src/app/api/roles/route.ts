@@ -1,6 +1,8 @@
 import { NextResponse, NextRequest } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloRol } from "@/modelos/Rol";
+import { autorizar_administracion, respuesta_error_administrativo, ROLES_CONOCIDOS,
+  texto_opcional, ErrorAdministrativo } from "@/lib/autorizacion";
 
 const ROLES_PREDETERMINADOS = [
   {
@@ -63,6 +65,7 @@ const ROLES_PREDETERMINADOS = [
 
 export async function GET() {
   try {
+    await autorizar_administracion("roles:ver");
     try {
       await conectar_base_datos();
       const roles_db = await ModeloRol.find().sort({ es_sistema: -1, nombre: 1 });
@@ -74,14 +77,16 @@ export async function GET() {
     }
 
     return NextResponse.json({ exito: true, datos: ROLES_PREDETERMINADOS });
-  } catch (error: any) {
-    return NextResponse.json({ exito: true, datos: ROLES_PREDETERMINADOS });
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }
 
 export async function POST(peticion: NextRequest) {
   try {
+    await autorizar_administracion("roles:crear");
     const cuerpo = await peticion.json();
+    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) throw new ErrorAdministrativo(400, "Cuerpo inválido");
     const { nombre, descripcion, acceso_dashboard, permisos } = cuerpo;
 
     if (!nombre || !descripcion) {
@@ -91,7 +96,11 @@ export async function POST(peticion: NextRequest) {
       );
     }
 
-    const nombre_limpio = nombre.trim().toLowerCase();
+    const nombre_limpio = texto_opcional(nombre, "nombre")!.toLowerCase();
+    texto_opcional(descripcion, "descripcion");
+    if (ROLES_CONOCIDOS.includes(nombre_limpio)) throw new ErrorAdministrativo(400, "Nombre de rol reservado por el sistema");
+    if (acceso_dashboard !== undefined && typeof acceso_dashboard !== "boolean") throw new ErrorAdministrativo(400, "acceso_dashboard debe ser booleano");
+    if (permisos !== undefined && (!Array.isArray(permisos) || !permisos.every(p => typeof p === "string"))) throw new ErrorAdministrativo(400, "Permisos inválidos");
 
     try {
       await conectar_base_datos();
@@ -117,26 +126,10 @@ export async function POST(peticion: NextRequest) {
         mensaje: "Nuevo rol creado exitosamente",
         datos: nuevo_rol,
       });
-    } catch (e_db: any) {
-      // Fallback si la BD aún no responde
-      const rol_creado = {
-        _id: `rol_${Date.now()}`,
-        nombre: nombre_limpio,
-        descripcion: descripcion.trim(),
-        acceso_dashboard: Boolean(acceso_dashboard),
-        es_sistema: false,
-        permisos: permisos || [],
-      };
-      return NextResponse.json({
-        exito: true,
-        mensaje: "Nuevo rol registrado",
-        datos: rol_creado,
-      });
+    } catch (e_db: unknown) {
+      throw new ErrorAdministrativo(503, "No se pudo guardar el rol");
     }
-  } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al crear el rol", detalle: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }
