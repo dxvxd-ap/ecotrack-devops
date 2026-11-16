@@ -30,7 +30,7 @@ function entorno(rol = 'superadmin', opciones = {}) {
       state.writes.push(['clerk:update', id, payload]); const u = state.users.find(u => u.id === id); Object.assign(u, payload); return u; },
     deleteUser: async id => { state.writes.push(['clerk:delete', id]); state.users = state.users.filter(u => u.id !== id); },
   };
-  function match(u, q) { return Object.entries(q).every(([k,v]) => k === '$or' ? v.some(f => match(u,f)) : u[k] === v); }
+  function match(u, q) { return Object.entries(q).every(([k,v]) => k === '$and' ? v.every(f => match(u,f)) : v && typeof v==='object' && '$exists' in v ? Object.hasOwn(u,k)===v.$exists : v && typeof v==='object' && '$eq' in v ? JSON.stringify(u[k])===JSON.stringify(v.$eq) : k === '$or' ? v.some(f => match(u,f)) : u[k] === v); }
   function modelo(key) { return {
     find: () => ({ sort: async () => [], then: (resolve, reject) => Promise.resolve(structuredClone(state[key])).then(resolve,reject) }),
     findOne: async q => { if(state.beforeFind) await state.beforeFind(key,q); return structuredClone(state[key].find(u => match(u,q)) || null); },
@@ -74,7 +74,18 @@ function entorno(rol = 'superadmin', opciones = {}) {
     '@/lib/inicializar_datos': { sembrar_datos_iniciales_si_esta_vacio: async () => { state.writes.push(['seed']); } }, '@/lib/base_datos': { conectar_base_datos: async () => { if (state.failDB) throw Error('BD no disponible'); if(state.beforeConnect) await state.beforeConnect(); } },
     '@/lib/almacen_local': { leer_almacen_local: () => { if(state.failLocalRead) throw Error('Lectura local fallida'); return structuredClone(state.local); },
       guardar_almacen_local: data => { if(state.failLocalWrite) throw Error('Escritura local fallida'); state.writes.push(['local:write']); state.local = structuredClone(data); } },
-    '@/modelos/Ruta': { ModeloRuta: coleccion('rutas') },
+    '@/modelos/Ruta': { ModeloRuta: {
+      ...coleccion('rutas'),
+      findOne: q => ({ lean: async () => structuredClone(state.rutas.find(u => match(u,q)) || null) }),
+      collection: { indexes: async () => [{ key: { id_ruta: 1 }, unique: true }] },
+      create: async documentos => {
+        const creados = documentos.map((d, i) => ({ ...structuredClone(d),
+          _id: (state.rutas.length + i + 1).toString(16).padStart(24, '0') }));
+        state.writes.push(['rutas:create', structuredClone(creados)]);
+        state.rutas.push(...creados);
+        return creados;
+      },
+    } },
     '@/modelos/Reclamo': { ModeloReclamo: coleccion('reclamos') },
     '@/modelos/Usuario': { ModeloUsuario: modelo('mongoUsers') },
     '@/modelos/PreasignacionUsuario': { ModeloPreasignacionUsuario: modelo('pre') },

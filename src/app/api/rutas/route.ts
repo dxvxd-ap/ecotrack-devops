@@ -1,197 +1,88 @@
-import { NextResponse, NextRequest } from "next/server";
-import { autorizar_administracion, respuesta_error_administrativo } from "@/lib/autorizacion";
-import { conectar_base_datos } from "@/lib/base_datos";
-import { ModeloRuta } from "@/modelos/Ruta";
-import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
+import { NextResponse, NextRequest } from 'next/server';
+import { autorizar_administracion, ErrorAdministrativo, respuesta_error_administrativo } from '@/lib/autorizacion';
+import { conectar_base_datos } from '@/lib/base_datos';
+import { ModeloRuta } from '@/modelos/Ruta';
+import { ErrorRuta, validarRutaActiva, esRutaPublicable, validarCreacionRuta, validarActualizacionRuta, validarBajaRuta } from '@/contratos/rutas';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function respuesta(datos: unknown, mensaje?: string) {
+  return NextResponse.json({ exito: true, ...(mensaje ? { mensaje } : {}), datos }, { headers: { 'Cache-Control': 'no-store' } });
+}
+function fallo(error: unknown) {
+  if (error instanceof ErrorAdministrativo) return respuesta_error_administrativo(error);
+  const mongo = error as { code?: number; name?: string } | null;
+  const conocido = error instanceof ErrorRuta ? error : mongo?.code === 11000
+    ? new ErrorRuta(409, 'RUTA_EN_CONFLICTO', 'Ya existe una ruta con ese identificador')
+    : mongo?.name === 'ValidationError' || mongo?.name === 'CastError' || mongo?.name === 'SyntaxError'
+      ? new ErrorRuta(400, 'ENTRADA_INVALIDA', 'Los datos de la ruta no son válidos')
+      : new ErrorRuta(503, 'BASE_DATOS_NO_DISPONIBLE', 'No se pudo confirmar la operación en la base de datos');
+  return NextResponse.json({ exito: false, mensaje: conocido.message, codigo: conocido.codigo },
+    { status: conocido.status, headers: { 'Cache-Control': 'no-store' } });
+}
+function noEncontrada(): never { throw new ErrorRuta(404, 'RUTA_NO_ENCONTRADA', 'No se encontró la ruta indicada'); }
+
+async function verificarIndice() {
+  const indices = await ModeloRuta.collection.indexes();
+  if (!indices.some(i => i.unique === true && Object.keys(i.key).length === 1 && i.key.id_ruta === 1 &&
+      !i.sparse && !i.partialFilterExpression)) {
+    throw new ErrorRuta(503, 'INDICE_NO_DISPONIBLE', 'El catálogo requiere un índice único completo de id_ruta');
+  }
+}
 
 export async function GET() {
   try {
-    try {
-      await conectar_base_datos();
-      const rutas_db = await ModeloRuta.find({ activa: true }).sort({ fecha_creacion: -1 });
-      if (rutas_db && rutas_db.length > 0) {
-        return NextResponse.json({ exito: true, datos: rutas_db });
-      }
-    } catch (e_db: any) {
-      console.warn("MongoDB Atlas no disponible para rutas, usando respaldo local:", e_db.message);
-    }
-
-    // Respaldo local
-    const datos = leer_almacen_local();
-    const rutas_activas = (datos.rutas || []).filter((r: any) => r.activa !== false);
-    return NextResponse.json({ exito: true, datos: rutas_activas });
-  } catch (error: any) {
-    const datos = leer_almacen_local();
-    return NextResponse.json({ exito: true, datos: datos.rutas || [] });
-  }
+    await conectar_base_datos();
+    const rutas = await ModeloRuta.find({ activa: true }).sort({ fecha_creacion: -1 });
+    return respuesta(rutas.filter(r => esRutaPublicable(r.toObject ? r.toObject() : r)));
+  } catch (error: unknown) { return fallo(error); }
 }
-
 export async function POST(peticion: NextRequest) {
   try {
-    await autorizar_administracion("rutas:gestionar");
-    const cuerpo = await peticion.json();
-
-    const {
-      id_ruta,
-      nombre,
-      descripcion,
-      trazado_geojson,
-      color_mapa,
-      distancia_estimada_km,
-      duracion_estimada_min,
-    } = cuerpo;
-
-    if (!id_ruta || !nombre || !trazado_geojson) {
-      return NextResponse.json(
-        { exito: false, mensaje: "Faltan campos obligatorios (id_ruta, nombre, trazado_geojson)" },
-        { status: 400 }
-      );
-    }
-
-    const objeto_ruta = {
-      _id: `ruta_${Date.now()}`,
-      id_ruta: id_ruta.trim().toUpperCase(),
-      nombre: nombre.trim(),
-      descripcion: descripcion || "",
-      trazado_geojson,
-      color_mapa: color_mapa || "#2f63ff",
-      distancia_estimada_km: distancia_estimada_km || 0,
-      duracion_estimada_min: duracion_estimada_min || 0,
-      activa: true,
-      fecha_creacion: new Date().toISOString(),
-    };
-
-    // 1. Guardar en respaldo local garantizado
-    const almacen = leer_almacen_local();
-    almacen.rutas = [objeto_ruta, ...(almacen.rutas || [])];
-    guardar_almacen_local(almacen);
-
-    // 2. Intentar guardar en MongoDB Atlas si está accesible
-    try {
-      await conectar_base_datos();
-      await ModeloRuta.create(objeto_ruta);
-    } catch (e_db: any) {
-      console.warn("Ruta guardada localmente (MongoDB Atlas pendiente de conexión):", e_db.message);
-    }
-
-    return NextResponse.json({
-      exito: true,
-      mensaje: "Ruta registrada exitosamente",
-      datos: objeto_ruta,
-    });
-  } catch (error: unknown) {
-    return respuesta_error_administrativo(error);
-  }
+    await autorizar_administracion('rutas:gestionar');
+    const datos = validarCreacionRuta(await peticion.json());
+    await conectar_base_datos();
+    await verificarIndice();
+    // Sin _id del cliente: Mongoose genera ObjectId. No responder hasta confirmar la escritura.
+    const [ruta] = await ModeloRuta.create([datos], { w: 'majority' });
+    if (!ruta) throw new Error('Persistencia sin documento confirmado');
+    return respuesta(ruta, 'Ruta registrada exitosamente');
+  } catch (error: unknown) { return fallo(error); }
 }
-
 export async function PUT(peticion: NextRequest) {
   try {
-    await autorizar_administracion("rutas:gestionar");
-    const cuerpo = await peticion.json();
-    const {
-      _id,
-      id_ruta,
-      nombre,
-      descripcion,
-      trazado_geojson,
-      color_mapa,
-      distancia_estimada_km,
-      duracion_estimada_min,
-      activa,
-    } = cuerpo;
-
-    if (!_id && !id_ruta) {
-      return NextResponse.json(
-        { exito: false, mensaje: "Se requiere _id o id_ruta para actualizar" },
-        { status: 400 }
-      );
-    }
-
-    // 1. Actualizar en respaldo local
-    const almacen = leer_almacen_local();
-    const indice = (almacen.rutas || []).findIndex(
-      (r: any) => (_id && r._id === _id) || (id_ruta && r.id_ruta === id_ruta)
-    );
-
-    let ruta_actualizada: any = null;
-    if (indice >= 0) {
-      almacen.rutas[indice] = {
-        ...almacen.rutas[indice],
-        ...(nombre ? { nombre: nombre.trim() } : {}),
-        ...(descripcion !== undefined ? { descripcion: descripcion.trim() } : {}),
-        ...(trazado_geojson ? { trazado_geojson } : {}),
-        ...(color_mapa ? { color_mapa } : {}),
-        ...(distancia_estimada_km !== undefined ? { distancia_estimada_km } : {}),
-        ...(duracion_estimada_min !== undefined ? { duracion_estimada_min } : {}),
-        ...(activa !== undefined ? { activa } : {}),
-        fecha_actualizacion: new Date().toISOString(),
-      };
-      ruta_actualizada = almacen.rutas[indice];
-      guardar_almacen_local(almacen);
-    }
-
-    // 2. Intentar actualizar en MongoDB Atlas
-    try {
-      await conectar_base_datos();
-      const obj_set: any = { fecha_actualizacion: new Date() };
-      if (nombre) obj_set.nombre = nombre.trim();
-      if (descripcion !== undefined) obj_set.descripcion = descripcion.trim();
-      if (trazado_geojson) obj_set.trazado_geojson = trazado_geojson;
-      if (color_mapa) obj_set.color_mapa = color_mapa;
-      if (distancia_estimada_km !== undefined) obj_set.distancia_estimada_km = distancia_estimada_km;
-      if (duracion_estimada_min !== undefined) obj_set.duracion_estimada_min = duracion_estimada_min;
-      if (activa !== undefined) obj_set.activa = activa;
-
-      const filtro: any = {};
-      if (_id && _id.length === 24) filtro._id = _id;
-      else if (id_ruta) filtro.id_ruta = id_ruta;
-      else filtro._id = _id;
-
-      const res_db = await ModeloRuta.findOneAndUpdate(filtro, { $set: obj_set }, { new: true });
-      if (res_db) ruta_actualizada = res_db;
-    } catch (e_db: any) {
-      console.warn("MongoDB no actualizado en PUT /api/rutas:", e_db.message);
-    }
-
-    return NextResponse.json({
-      exito: true,
-      mensaje: "Ruta actualizada exitosamente",
-      datos: ruta_actualizada,
-    });
-  } catch (error: unknown) {
-    return respuesta_error_administrativo(error);
-  }
+    await autorizar_administracion('rutas:gestionar');
+    const { selector, cambios } = validarActualizacionRuta(await peticion.json());
+    await conectar_base_datos();
+    await verificarIndice();
+    // Si llegan ambos selectores deben identificar EL MISMO documento. Nunca upsert ni filtro vacío.
+    const anterior = await ModeloRuta.findOne(selector).lean();
+    if (!anterior) noEncontrada();
+    const resultante = { ...anterior, ...cambios };
+    if (resultante.activa === true) validarRutaActiva(resultante);
+    // Comparación atómica de todos los campos que participan en la validación.
+    // No depende de __v ni requiere migrar documentos existentes.
+    const campos = ['id_ruta', 'nombre', 'descripcion', 'trazado_geojson', 'color_mapa',
+      'distancia_estimada_km', 'duracion_estimada_min', 'activa'];
+    const condiciones = campos.map(campo => Object.hasOwn(anterior, campo)
+      ? { [campo]: { $eq: (anterior as Record<string, unknown>)[campo] } }
+      : { [campo]: { $exists: false } });
+    const ruta = await ModeloRuta.findOneAndUpdate({ _id: anterior._id, $and: condiciones }, { $set: cambios },
+      { new: true, runValidators: true, upsert: false, writeConcern: { w: 'majority' } });
+    if (!ruta) throw new ErrorRuta(409, 'RUTA_EN_CONFLICTO', 'La ruta cambió durante la operación; vuelve a consultarla');
+    return respuesta(ruta, 'Ruta actualizada exitosamente');
+  } catch (error: unknown) { return fallo(error); }
 }
-
 export async function DELETE(peticion: NextRequest) {
   try {
-    await autorizar_administracion("rutas:gestionar");
-    const { searchParams } = new URL(peticion.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { exito: false, mensaje: "Se requiere el parámetro ID" },
-        { status: 400 }
-      );
-    }
-
-    // 1. Eliminar en respaldo local
-    const almacen = leer_almacen_local();
-    almacen.rutas = (almacen.rutas || []).filter((r: any) => r._id !== id && r.id_ruta !== id);
-    guardar_almacen_local(almacen);
-
-    // 2. Intentar eliminar en MongoDB Atlas
-    try {
-      await conectar_base_datos();
-      await ModeloRuta.findByIdAndUpdate(id, { activa: false });
-    } catch (e_db) {}
-
-    return NextResponse.json({
-      exito: true,
-      mensaje: "Ruta eliminada con éxito",
-    });
-  } catch (error: unknown) {
-    return respuesta_error_administrativo(error);
-  }
+    await autorizar_administracion('rutas:gestionar');
+    const selector = validarBajaRuta(new URL(peticion.url).searchParams);
+    await conectar_base_datos();
+    await verificarIndice();
+    const ruta = await ModeloRuta.findOneAndUpdate(selector, { $set: { activa: false } },
+      { new: true, runValidators: true, upsert: false, writeConcern: { w: 'majority' } });
+    if (!ruta) noEncontrada();
+    return respuesta(ruta, 'Ruta eliminada con éxito');
+  } catch (error: unknown) { return fallo(error); }
 }
