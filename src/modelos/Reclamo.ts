@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface InterfazReclamo extends Document {
+  ciudadano_id_clerk?: string;
   folio: string;
   ciudadano_nombre: string;
   ciudadano_telefono: string;
@@ -23,6 +24,8 @@ export interface InterfazReclamo extends Document {
 
 const EsquemaReclamo = new Schema<InterfazReclamo>(
   {
+    // Opcional: los históricos permanecen sin propietario, sin atribución por correo.
+    ciudadano_id_clerk: { type: String, index: true, immutable: true },
     folio: {
       type: String,
       required: true,

@@ -8,10 +8,10 @@ import { ModeloBloqueoAdministrativo } from "@/modelos/BloqueoAdministrativo";
 export const ROLES_INFERIORES = ["secretario", "moderador", "ciudadano", "conductor", "camion"] as const;
 export const ROLES_CONOCIDOS: readonly string[] = ["superadmin", "admin", ...ROLES_INFERIORES];
 export type PermisoAdministrativo = "usuarios:ver" | "usuarios:gestionar" | "usuarios:eliminar" |
-  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver";
+  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver" | "rutas:gestionar" | "reclamos:ver";
 const PERMISOS: Record<string, readonly PermisoAdministrativo[]> = {
-  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver"],
-  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver"],
+  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver"],
+  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver"],
   secretario: ["dashboard:ver"],
   moderador: ["dashboard:ver"],
 };
@@ -122,8 +122,27 @@ export async function autorizar_administracion(permiso: PermisoAdministrativo, i
   }
 }
 
+/** Ciudadanos: solo recursos propios. Administración: lectura municipal completa. */
+export async function autorizar_reclamos(): Promise<ActorAdministrativo> {
+  try {
+    const usuario = await identidad_autenticada();
+    validar_identidad_fundadora(usuario);
+    const rol = rol_efectivo(usuario);
+    if (rol !== "ciudadano" && (!Object.hasOwn(PERMISOS, rol) || !PERMISOS[rol].includes("reclamos:ver"))) {
+      throw new ErrorAdministrativo(403, "No tienes permisos para esta operación");
+    }
+    const registro = await estado_cuenta(usuario);
+    if (registro && registro.rol !== rol) throw new ErrorAdministrativo(403, "Los roles de la cuenta requieren conciliación administrativa");
+    return { usuario, rol };
+  } catch (error) {
+    if (error instanceof ErrorAdministrativo) throw error;
+    throw new ErrorAdministrativo(503, "No se pudo verificar la autorización");
+  }
+}
+
 export function permiso_api_administrativa(ruta: string, metodo: string): PermisoAdministrativo | null {
   const normalizada = ruta.replace(/\/+$/, "");
+  if (normalizada === "/api/rutas" && ["POST", "PUT", "DELETE"].includes(metodo)) return "rutas:gestionar";
   if (normalizada === "/api/usuarios/preasignar") return "preasignaciones:gestionar";
   if (normalizada === "/api/usuarios") return metodo === "GET" ? "usuarios:ver" : metodo === "DELETE" ? "usuarios:eliminar" : "usuarios:gestionar";
   if (normalizada === "/api/roles") return metodo === "GET" ? "roles:ver" : "roles:crear";
