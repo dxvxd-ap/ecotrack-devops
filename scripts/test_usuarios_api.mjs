@@ -1,6 +1,7 @@
 import { createClerkClient } from "@clerk/backend";
 
-const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || "sk_test_iuF6484mizoIX1kxlGUAbgXOdJ3W2oNtoo4MNSmnIB";
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
+if (!CLERK_SECRET_KEY) throw new Error("Configura CLERK_SECRET_KEY en el entorno antes de ejecutar este script.");
 
 async function test() {
   const clerk = createClerkClient({ secretKey: CLERK_SECRET_KEY });
