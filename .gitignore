@@ -25,3 +25,29 @@ yarn-error.log*
 # Sistema
 .DS_Store
 *.pem
+
+# Configuración privada (solo las plantillas se versionan)
+.env*
+!.env.example
+**/node_modules/
+*.key
+*.p12
+*.pfx
+*.srl
+.certs/
+
+# Datos locales y artefactos reproducibles
+/datos_locales_respaldo.json
+*.tsbuildinfo
+/.next-*/
+/public/eco/
+/.playwright-mcp/
+/playwright-screenshot-*.png
+/playwright-snapshot-*.yml
+/graphify-out/
+/backups/
+
+# Diagnósticos temporales del navegador
+/apps/ciudadano/public/diag-*.html
+/apps/ciudadano/public/test-icon.html
+/apps/ciudadano/public/manifest-test.json

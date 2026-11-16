@@ -18,7 +18,7 @@ function entorno(rol = 'superadmin', opciones = {}) {
   const actor = usuario('user_actor', rol);
   const target = usuario('user_target', 'ciudadano');
   const state = { sesion: actor.id, users: [actor, target], local: { preasignaciones: [] },
-    pre: [], mongoUsers: [], writes: [], locks: new Set(), failClerk: false, failDB: false, beforeUpdate: null, beforeFind: null, beforeConnect: null, failLocalRead: false, failLocalWrite: false };
+    pre: [], mongoUsers: [], rutas: [], reclamos: [], queries: [], writes: [], locks: new Set(), failClerk: false, failDB: false, beforeUpdate: null, beforeFind: null, beforeConnect: null, failLocalRead: false, failLocalWrite: false };
   const users = {
     getUser: async id => { if (state.failClerk) throw Error('Clerk no disponible');
       const u = state.users.find(u => u.id === id); if (!u) throw Object.assign(Error('No existe'), { status: 404 }); return structuredClone(u); },
@@ -43,6 +43,26 @@ function entorno(rol = 'superadmin', opciones = {}) {
     deleteOne: async q => { state.writes.push([`${key}:delete`,q]); state[key] = state[key].filter(u => !match(u,q)); return { deletedCount: 1 }; },
     create: async data => { state.writes.push([`${key}:create`,data]); return data; },
   }; }
+  // Sustituye únicamente MongoDB; conserva filtros y efectos de los handlers reales.
+  function coleccion(key) { return {
+    find: query => {
+      state.queries.push([key, structuredClone(query)]);
+      const data = state[key].filter(u => match(u, query));
+      return { sort: () => ({
+        then: (resolve, reject) => Promise.resolve(structuredClone(data)).then(resolve, reject),
+        limit: async n => structuredClone(data.slice(0, n)),
+      }) };
+    },
+    create: async data => { state.writes.push([key + ':create', structuredClone(data)]); state[key].push(structuredClone(data)); return data; },
+    findOneAndUpdate: async (query, update) => {
+      state.writes.push([key + ':update', query]); const doc = state[key].find(u => match(u, query));
+      if (doc) Object.assign(doc, update.$set); return doc || null;
+    },
+    findByIdAndUpdate: async (id, update) => {
+      state.writes.push([key + ':update', {_id: id}]); const doc = state[key].find(u => u._id === id);
+      if (doc) Object.assign(doc, update); return doc || null;
+    },
+  }; }
   let middleware;
   const stubs = {
     '@clerk/backend': { createClerkClient: () => ({ users }) },
@@ -54,15 +74,19 @@ function entorno(rol = 'superadmin', opciones = {}) {
     '@/lib/inicializar_datos': { sembrar_datos_iniciales_si_esta_vacio: async () => { state.writes.push(['seed']); } }, '@/lib/base_datos': { conectar_base_datos: async () => { if (state.failDB) throw Error('BD no disponible'); if(state.beforeConnect) await state.beforeConnect(); } },
     '@/lib/almacen_local': { leer_almacen_local: () => { if(state.failLocalRead) throw Error('Lectura local fallida'); return structuredClone(state.local); },
       guardar_almacen_local: data => { if(state.failLocalWrite) throw Error('Escritura local fallida'); state.writes.push(['local:write']); state.local = structuredClone(data); } },
+    '@/modelos/Ruta': { ModeloRuta: coleccion('rutas') },
+    '@/modelos/Reclamo': { ModeloReclamo: coleccion('reclamos') },
     '@/modelos/Usuario': { ModeloUsuario: modelo('mongoUsers') },
     '@/modelos/PreasignacionUsuario': { ModeloPreasignacionUsuario: modelo('pre') },
     '@/modelos/Rol': { ModeloRol: modelo('pre') },
     '@/modelos/BloqueoAdministrativo': { ModeloBloqueoAdministrativo: {
       findOne: async ({_id}) => state.locks.has(_id) ? {_id} : null,
-      create: async ({_id}) => { if (state.locks.has(_id)) throw Object.assign(Error('Bloqueado'),{code:11000}); state.locks.add(_id); },
+      create: async ({_id}) => { if (state.locks.has(_id)) throw Object.assign(Error('Bloqueado'),{code:11000}); state.locks.add(_id); if (state.afterLock) await state.afterLock(_id); },
       deleteOne: async ({_id}) => { state.locks.delete(_id); },
     } },
   };
+  // Extensión explícita para sustituir transportes adicionales en pruebas aisladas.
+  Object.assign(stubs, opciones.dependencias || {});
   const cache = new Map();
   function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
@@ -78,7 +102,7 @@ function entorno(rol = 'superadmin', opciones = {}) {
       throw Error(`Dependencia externa no permitida en prueba: ${name}`);
     };
     vm.runInNewContext('(function(require,module,exports){' + code + '\n})',
-      { process: {env: opciones.env || {}, cwd: () => root}, console: {log(){},warn(){},error(){}}, Response, URL, Date, Set, Map })(req,module,module.exports);
+      { process: {env: opciones.env || {}, cwd: () => root}, console: opciones.console || {log(){},warn(){},error(){}}, Response, URL, Date, Set, Map, TextDecoder })(req,module,module.exports);
     return module.exports;
   }
   return { state, actor, target, load,

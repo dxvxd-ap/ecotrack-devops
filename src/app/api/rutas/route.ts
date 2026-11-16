@@ -1,4 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
+import { autorizar_administracion, respuesta_error_administrativo } from "@/lib/autorizacion";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloRuta } from "@/modelos/Ruta";
 import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
@@ -27,6 +28,7 @@ export async function GET() {
 
 export async function POST(peticion: NextRequest) {
   try {
+    await autorizar_administracion("rutas:gestionar");
     const cuerpo = await peticion.json();
 
     const {
@@ -77,17 +79,14 @@ export async function POST(peticion: NextRequest) {
       mensaje: "Ruta registrada exitosamente",
       datos: objeto_ruta,
     });
-  } catch (error: any) {
-    console.error("Error al guardar ruta:", error);
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al guardar la ruta", detalle: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }
 
 export async function PUT(peticion: NextRequest) {
   try {
+    await autorizar_administracion("rutas:gestionar");
     const cuerpo = await peticion.json();
     const {
       _id,
@@ -159,16 +158,14 @@ export async function PUT(peticion: NextRequest) {
       mensaje: "Ruta actualizada exitosamente",
       datos: ruta_actualizada,
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al actualizar la ruta", detalle: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }
 
 export async function DELETE(peticion: NextRequest) {
   try {
+    await autorizar_administracion("rutas:gestionar");
     const { searchParams } = new URL(peticion.url);
     const id = searchParams.get("id");
 
@@ -194,10 +191,7 @@ export async function DELETE(peticion: NextRequest) {
       exito: true,
       mensaje: "Ruta eliminada con éxito",
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al eliminar la ruta", detalle: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return respuesta_error_administrativo(error);
   }
 }

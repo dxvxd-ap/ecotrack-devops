@@ -4,8 +4,10 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
 import { createClerkClient } from "@clerk/backend";
 import mongoose from "mongoose";
 
-const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || "sk_test_iuF6484mizoIX1kxlGUAbgXOdJ3W2oNtoo4MNSmnIB";
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://22610282_db_user:lyVyeVjseMMAHA2l@clusterecoruta.cgt7pmk.mongodb.net/ecoruta?retryWrites=true&w=majority&appName=ClusterEcoRuta";
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
+if (!CLERK_SECRET_KEY) throw new Error("Configura CLERK_SECRET_KEY en el entorno antes de ejecutar este script.");
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) throw new Error("Configura MONGODB_URI en el entorno antes de ejecutar este script.");
 const CORREO_OBJETIVO = "22610282@utgz.edu.mx";
 
 async function promover() {

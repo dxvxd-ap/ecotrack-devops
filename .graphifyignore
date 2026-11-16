@@ -1,0 +1,16 @@
+# Graphify 0.9.105: patrones compatibles con gitignore, en cualquier nivel.
+node_modules/
+.next/
+.next-*/
+dist/
+build/
+coverage/
+backups/
+.expo/
+graphify-out/
+*.tsbuildinfo
+# Salidas generadas de Next.js, Playwright y herramientas móviles.
+out/
+.playwright-mcp/
+playwright-screenshot-*.png
+playwright-snapshot-*.yml
