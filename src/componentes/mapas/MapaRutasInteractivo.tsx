@@ -1,5 +1,6 @@
 "use client";
 
+import { crearPopupRuta, segmentosRuta } from "@/lib/rutas_mapa";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Maximize2, Minimize2, Plus, Minus, MoveVertical } from "lucide-react";
 
@@ -185,30 +186,12 @@ export default function MapaRutasInteractivo({
       const L = mod.default || mod;
 
       rutas_existentes.forEach((ruta) => {
-        if (
-          ruta &&
-          ruta.trazado_geojson &&
-          Array.isArray(ruta.trazado_geojson.coordinates) &&
-          ruta.trazado_geojson.coordinates.length > 0
-        ) {
-          const puntos_leaflet: [number, number][] = ruta.trazado_geojson.coordinates.map(
-            (c: [number, number]) => [c[1], c[0]]
-          );
-
-          const linea = L.polyline(puntos_leaflet, {
-            color: ruta.color_mapa || "#2f63ff",
-            weight: 5,
-            opacity: 0.85,
+        const segmentos = segmentosRuta(ruta?.trazado_geojson);
+        if (segmentos.length) {
+          const linea = L.polyline(segmentos, {
+            color: ruta.color_mapa || "#2f63ff", weight: 5, opacity: 0.85,
           });
-
-          linea.bindPopup(`
-            <div style="font-family: sans-serif; color: #111;">
-              <strong style="text-transform: uppercase;">${ruta.nombre || "Ruta"}</strong><br/>
-              <span style="font-size: 11px; color: #666;">ID: ${ruta.id_ruta || "S/ID"}</span><br/>
-              <span style="font-size: 12px;">Distancia: ${ruta.distancia_estimada_km || 0} km</span>
-            </div>
-          `);
-
+          linea.bindPopup(crearPopupRuta(ruta));
           capa_rutas_guardadas_ref.current?.addLayer(linea);
         }
       });

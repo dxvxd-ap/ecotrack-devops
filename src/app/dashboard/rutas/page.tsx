@@ -1,5 +1,6 @@
 "use client";
 
+import { puedeEditarGeometria } from "@/lib/rutas_mapa";
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
@@ -130,6 +131,10 @@ export default function PaginaGestionRutas() {
   };
 
   const iniciar_edicion_ruta = (r: any) => {
+    if (!puedeEditarGeometria(r.trazado_geojson)) {
+      fijar_mensaje_notificacion("Esta ruta se conserva sin cambios. El editor solo permite LineString de dos dimensiones; no permite editar MultiLineString ni unir sus segmentos.");
+      return;
+    }
     fijar_ruta_en_edicion(r);
     fijar_id_ruta(r.id_ruta || "");
     fijar_nombre_ruta(r.nombre || "");
@@ -158,6 +163,10 @@ export default function PaginaGestionRutas() {
 
   const guardar_nueva_ruta = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (ruta_en_edicion && !puedeEditarGeometria(ruta_en_edicion.trazado_geojson)) {
+      alert("No se guardaron cambios: esta geometría no puede editarse sin perder información.");
+      return;
+    }
 
     if (coordenadas_detalle.length < 2) {
       alert("Debes marcar al menos dos puntos en el mapa para trazar la ruta por las calles.");

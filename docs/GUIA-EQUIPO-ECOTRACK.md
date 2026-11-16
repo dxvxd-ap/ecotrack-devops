@@ -185,3 +185,12 @@ No versionar `.env*` salvo `.env.example`, claves/certificados privados, datos l
 Se encontraron credenciales incrustadas en tres scripts históricos y se retiraron del código actual. **Requieren rotación por los responsables de Clerk/MongoDB:** borrar el literal no revoca la credencial ni borra el historial. No se rotaron secretos ni se reescribió el historial en esta tarea. Los scripts operativos de conciliación/promoción pueden modificar cuentas o datos y requieren un objetivo revisado y autorización específica; no forman parte del arranque.
 
 Graphify es una herramienta local de navegación, no una dependencia de runtime. Sus salidas/cachés se excluyen de la publicación por ser generadas y contener rutas del equipo. Si se necesita el grafo, generarlo localmente según `AGENTS.md`, comprobar su frescura y tomar el código como autoridad. No hace falta reconstruirlo para ejecutar la aplicación.
+
+
+## Actualización 3.6A — rutas exclusivamente en MongoDB
+
+El catálogo `/api/rutas` dejó de leer/escribir el JSON local. MongoDB vacío devuelve `datos: []`; un error de base devuelve 503. POST/PUT/DELETE confirman persistencia y conservan sus permisos. El JSON continúa siendo necesario para otras APIs existentes, que no se modificaron.
+
+Para preparar datos ficticios de forma explícita en una base local, consultar [FASE-3.6A-RUTAS-MONGODB.md](FASE-3.6A-RUTAS-MONGODB.md). El preparador no usa credenciales de Atlas ni carga `.env.local`, requiere URI loopback con nombre de desarrollo y `--confirm` antes de escribir. El índice único de rutas se prepara explícitamente; el modelo no crea colecciones o índices al arrancar.
+
+No se importó el respaldo antiguo ni se recuperó el catálogo municipal vigente. La integración de calendario y otros módulos que todavía consultan referencias de rutas en JSON queda pendiente. La corrección de respuestas del middleware/Server Actions también queda fuera de 3.6A.
