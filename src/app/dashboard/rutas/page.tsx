@@ -62,6 +62,7 @@ export default function PaginaGestionRutas() {
   // Estado del trazado
   const [puntos_clave, fijar_puntos_clave] = useState<[number, number][]>([]);
   const [coordenadas_detalle, fijar_coordenadas_detalle] = useState<[number, number][]>([]);
+  const [tramos_historicos, fijar_tramos_historicos] = useState<[number, number][][]>([]);
   const [nombre_ruta, fijar_nombre_ruta] = useState("");
   const [id_ruta, fijar_id_ruta] = useState("");
   const [descripcion_ruta, fijar_descripcion_ruta] = useState("");

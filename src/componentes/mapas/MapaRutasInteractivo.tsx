@@ -8,8 +8,14 @@ const COORDENADAS_GUTIERREZ_ZAMORA: [number, number] = [20.4514, -97.0886];
 interface PropsMapaRutas {
   rutas_existentes: any[];
   coordenadas_trazado: [number, number][]; // Coordenadas detalladas calle por calle
-  al_cambiar_coordenadas: (nuevas_coords: [number, number][], puntos_clave: [number, number][], distancia_metros: number) => void;
+  al_cambiar_coordenadas: (
+    nuevas_coords: [number, number][],
+    puntos_clave: [number, number][],
+    distancia_metros: number,
+    tramos_calles?: [number, number][][]
+  ) => void;
   puntos_clave: [number, number][];
+  tramos_historicos?: [number, number][][];
   color_activo: string;
   modo_dibujo: boolean;
   ajustar_a_calles: boolean;
@@ -22,6 +28,7 @@ export default function MapaRutasInteractivo({
   coordenadas_trazado,
   al_cambiar_coordenadas,
   puntos_clave,
+  tramos_historicos = [],
   color_activo,
   modo_dibujo,
   ajustar_a_calles,
@@ -135,7 +142,7 @@ export default function MapaRutasInteractivo({
       const nuevo_punto: [number, number] = [e.latlng.lat, e.latlng.lng];
 
       if (puntos_clave.length === 0) {
-        al_cambiar_coordenadas([nuevo_punto], [nuevo_punto], 0);
+        al_cambiar_coordenadas([nuevo_punto], [nuevo_punto], 0, [[nuevo_punto]]);
       } else {
         const ultimo_clave = puntos_clave[puntos_clave.length - 1];
         const nuevos_claves = [...puntos_clave, nuevo_punto];
@@ -153,17 +160,21 @@ export default function MapaRutasInteractivo({
             ...tramo_calle.slice(1),
           ];
 
-          al_cambiar_coordenadas(coordenadas_unidas, nuevos_claves, distancia);
+          const nuevos_tramos = [...tramos_historicos, tramo_calle];
+          al_cambiar_coordenadas(coordenadas_unidas, nuevos_claves, distancia, nuevos_tramos);
         } else {
+          const tramo_directo: [number, number][] = [ultimo_clave, nuevo_punto];
+          const nuevos_tramos = [...tramos_historicos, tramo_directo];
           al_cambiar_coordenadas(
             [...coordenadas_trazado, nuevo_punto],
             nuevos_claves,
-            0
+            0,
+            nuevos_tramos
           );
         }
       }
     },
-    [modo_dibujo, puntos_clave, coordenadas_trazado, ajustar_a_calles, al_cambiar_coordenadas]
+    [modo_dibujo, puntos_clave, coordenadas_trazado, tramos_historicos, ajustar_a_calles, al_cambiar_coordenadas]
   );
 
   useEffect(() => {
