@@ -3,6 +3,7 @@
 import { puedeEditarGeometria } from "@/lib/rutas_mapa";
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import Skeleton from "react-loading-skeleton";
 import {
   Map,
   Plus,
@@ -17,6 +18,9 @@ import {
   Route as IconoRuta,
   Edit2,
   X,
+  Calendar,
+  Clock,
+  Truck,
 } from "lucide-react";
 
 // Importar mapa dinámicamente sin SSR para Leaflet
@@ -25,8 +29,8 @@ const MapaRutas = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[550px] w-full bg-zinc-900 animate-pulse rounded-xl flex items-center justify-center font-mono text-xs text-zinc-500">
-        Cargando mapa cartográfico de Gutiérrez Zamora, Ver...
+      <div className="h-[550px] w-full rounded-xl overflow-hidden">
+        <Skeleton height={550} borderRadius="0.75rem" />
       </div>
     ),
   }
@@ -69,8 +73,29 @@ export default function PaginaGestionRutas() {
   const [descripcion_ruta, fijar_descripcion_ruta] = useState("");
   const [color_seleccionado, fijar_color_seleccionado] = useState("#2f63ff");
 
+  // Programación oficial recurrente de la ruta
+  const [dias_recoleccion, fijar_dias_recoleccion] = useState<string[]>([
+    "lunes",
+    "miercoles",
+    "viernes",
+  ]);
+  const [hora_inicio, fijar_hora_inicio] = useState("07:00");
+  const [hora_fin, fijar_hora_fin] = useState("13:00");
+  const [camion_asignado_id, fijar_camion_asignado_id] = useState("");
+  const [camiones_disponibles, fijar_camiones_disponibles] = useState<any[]>([]);
+
   // Estado de edición de ruta existente
   const [ruta_en_edicion, fijar_ruta_en_edicion] = useState<any>(null);
+
+  const DIAS_SEMANA = [
+    { id: "lunes", etiqueta: "Lun", nombre: "Lunes" },
+    { id: "martes", etiqueta: "Mar", nombre: "Martes" },
+    { id: "miercoles", etiqueta: "Mié", nombre: "Miércoles" },
+    { id: "jueves", etiqueta: "Jue", nombre: "Jueves" },
+    { id: "viernes", etiqueta: "Vie", nombre: "Viernes" },
+    { id: "sabado", etiqueta: "Sáb", nombre: "Sábado" },
+    { id: "domingo", etiqueta: "Dom", nombre: "Domingo" },
+  ];
 
   const colores_disponibles = [
     { nombre: "Cobalto", hex: "#2f63ff" },
@@ -80,13 +105,27 @@ export default function PaginaGestionRutas() {
     { nombre: "Carmesí", hex: "#ef4444" },
   ];
 
+  const alternar_dia = (diaId: string) => {
+    fijar_dias_recoleccion((prev) =>
+      prev.includes(diaId) ? prev.filter((d) => d !== diaId) : [...prev, diaId]
+    );
+  };
+
   const cargar_rutas = async () => {
     try {
       fijar_cargando(true);
-      const respuesta = await fetch("/api/rutas");
-      const datos = await respuesta.json();
-      if (datos.exito) {
-        fijar_rutas(datos.datos || []);
+      const [respRutas, respCamiones] = await Promise.all([
+        fetch("/api/rutas").then((r) => r.json()),
+        fetch("/api/camiones")
+          .then((r) => r.json())
+          .catch(() => ({ exito: false })),
+      ]);
+
+      if (respRutas.exito) {
+        fijar_rutas(respRutas.datos || []);
+      }
+      if (respCamiones.exito) {
+        fijar_camiones_disponibles(respCamiones.datos || []);
       }
     } catch (e) {
       console.error("Error al cargar rutas:", e);
@@ -127,6 +166,10 @@ export default function PaginaGestionRutas() {
     fijar_id_ruta("");
     fijar_descripcion_ruta("");
     fijar_color_seleccionado("#2f63ff");
+    fijar_dias_recoleccion(["lunes", "miercoles", "viernes"]);
+    fijar_hora_inicio("07:00");
+    fijar_hora_fin("13:00");
+    fijar_camion_asignado_id("");
     fijar_ruta_en_edicion(null);
     fijar_modo_dibujo(false);
   };
@@ -141,6 +184,13 @@ export default function PaginaGestionRutas() {
     fijar_nombre_ruta(r.nombre || "");
     fijar_descripcion_ruta(r.descripcion || "");
     fijar_color_seleccionado(r.color_mapa || "#2f63ff");
+
+    // Cargar programación oficial recurrente
+    fijar_dias_recoleccion(r.diasRecoleccion || r.dias_recoleccion || ["lunes", "miercoles", "viernes"]);
+    fijar_hora_inicio(r.horarioHabitual?.horaInicio || r.horario_habitual?.hora_inicio || "07:00");
+    fijar_hora_fin(r.horarioHabitual?.horaFin || r.horario_habitual?.hora_fin || "13:00");
+    const idCamion = r.camionAsignadoId?._id || r.camionAsignadoId || r.camion_asignado_id || "";
+    fijar_camion_asignado_id(idCamion);
 
     // Convertir de GeoJSON [lon, lat] a [lat, lon] para Leaflet
     if (r.trazado_geojson?.coordinates && Array.isArray(r.trazado_geojson.coordinates)) {
@@ -193,6 +243,12 @@ export default function PaginaGestionRutas() {
         color_mapa: color_seleccionado,
         distancia_estimada_km: distancia_calculada_km,
         duracion_estimada_min: Math.round(distancia_calculada_km * 12),
+        diasRecoleccion: dias_recoleccion.length > 0 ? dias_recoleccion : ["lunes", "miercoles", "viernes"],
+        horarioHabitual: {
+          horaInicio: hora_inicio || "07:00",
+          horaFin: hora_fin || "13:00",
+        },
+        camionAsignadoId: camion_asignado_id || null,
       };
 
       const es_edicion = Boolean(ruta_en_edicion);
@@ -255,15 +311,28 @@ export default function PaginaGestionRutas() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => fijar_modo_dibujo(!modo_dibujo)}
+            onClick={() => {
+              if (modo_dibujo) {
+                limpiar_trazado_actual();
+              } else {
+                limpiar_trazado_actual();
+                fijar_modo_dibujo(true);
+              }
+            }}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-mono font-semibold transition-all shadow-md ${
               modo_dibujo
-                ? "bg-amber-600 text-white hover:bg-amber-500"
+                ? "bg-rose-600/90 text-white hover:bg-rose-600 border border-rose-500/30"
                 : "bg-blue-600 text-white hover:bg-blue-500"
             }`}
           >
-            <Plus className="w-4 h-4" />
-            <span>{modo_dibujo ? "Finalizar / Salir" : "Iniciar Trazado de Calles"}</span>
+            {modo_dibujo ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            <span>
+              {modo_dibujo
+                ? ruta_en_edicion
+                  ? "Cancelar Edición"
+                  : "Cancelar Trazado"
+                : "Trazar Nueva Ruta"}
+            </span>
           </button>
         </div>
       </div>
@@ -289,6 +358,7 @@ export default function PaginaGestionRutas() {
               modo_dibujo={modo_dibujo}
               ajustar_a_calles={ajustar_a_calles}
               al_cambiar_ajuste_calles={fijar_ajustar_a_calles}
+              id_ruta_activa={ruta_en_edicion?._id || ruta_en_edicion?.id_ruta}
             />
 
             {/* Barra de Controles Rápidos del Mapa */}
@@ -426,6 +496,89 @@ export default function PaginaGestionRutas() {
                   </div>
                 </div>
 
+                {/* 1. Selector de Días de Recolección */}
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1.5 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                    <span>DÍAS DE RECOLECCIÓN HABITUALES</span>
+                  </label>
+                  <div className="grid grid-cols-7 gap-1">
+                    {DIAS_SEMANA.map((dia) => {
+                      const activo = dias_recoleccion.includes(dia.id);
+                      return (
+                        <button
+                          key={dia.id}
+                          type="button"
+                          onClick={() => alternar_dia(dia.id)}
+                          className={`py-1.5 text-[10px] font-mono font-bold rounded-lg border transition-all text-center ${
+                            activo
+                              ? "bg-blue-600 text-white border-blue-400 shadow-sm"
+                              : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:text-white hover:bg-zinc-700"
+                          }`}
+                          title={`Recolección los días ${dia.nombre}`}
+                        >
+                          {dia.etiqueta}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono mt-1 block">
+                    {dias_recoleccion.length > 0
+                      ? `Activo: ${dias_recoleccion.join(", ")}`
+                      : "Selecciona al menos un día de servicio"}
+                  </span>
+                </div>
+
+                {/* 2. Horario Habitual de Operación */}
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1.5 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>HORARIO HABITUAL DE SERVICIO</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] text-zinc-400 font-mono block mb-0.5">INICIO</span>
+                      <input
+                        type="time"
+                        value={hora_inicio}
+                        onChange={(e) => fijar_hora_inicio(e.target.value)}
+                        required
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-400 font-mono block mb-0.5">TÉRMINO</span>
+                      <input
+                        type="time"
+                        value={hora_fin}
+                        onChange={(e) => fijar_hora_fin(e.target.value)}
+                        required
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Camión Titular Asignado */}
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1.5 flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>CAMIÓN TITULAR ASIGNADO</span>
+                  </label>
+                  <select
+                    value={camion_asignado_id}
+                    onChange={(e) => fijar_camion_asignado_id(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">-- Sin camión titular fijo (rotativo) --</option>
+                    {camiones_disponibles.map((c) => (
+                      <option key={c._id} value={c._id}>
+                        Unidad {c.numero_unidad} - {c.modelo} ({c.matricula}) [{c.estado}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="p-3 bg-zinc-800/60 rounded-xl border border-zinc-700/50 space-y-1 font-mono text-[11px] text-zinc-300">
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Paradas:</span>
@@ -465,9 +618,31 @@ export default function PaginaGestionRutas() {
                 </h2>
               </div>
 
-              {rutas.length === 0 ? (
+              {cargando ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="p-4 bg-zinc-800/60 border border-zinc-700/60 rounded-xl space-y-2.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2 flex-1">
+                          <Skeleton circle width={12} height={12} />
+                          <Skeleton width="60%" height={16} containerClassName="flex-1" />
+                        </div>
+                        <Skeleton width={55} height={24} borderRadius={8} />
+                      </div>
+                      <Skeleton width="85%" height={12} />
+                      <div className="flex items-center justify-between pt-1 border-t border-zinc-700/40">
+                        <Skeleton width={80} height={10} />
+                        <Skeleton width={90} height={10} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : rutas.length === 0 ? (
                 <div className="py-8 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
-                  No hay rutas en el catálogo. Pulsa "Iniciar Trazado de Calles" arriba.
+                  No hay rutas en el catálogo. Pulsa "Trazar Nueva Ruta" arriba.
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
@@ -507,6 +682,56 @@ export default function PaginaGestionRutas() {
 
                       <div className="text-[11px] text-zinc-400 line-clamp-2">
                         {r.descripcion || "Sin descripción"}
+                      </div>
+
+                      {/* Programación Habitual Oficial */}
+                      <div className="bg-zinc-900/80 rounded-lg p-2 border border-zinc-700/50 space-y-1.5 text-[11px] font-mono">
+                        <div className="flex items-center justify-between text-zinc-300">
+                          <span className="flex items-center gap-1 text-zinc-400">
+                            <Clock className="w-3 h-3 text-blue-400" />
+                            <span>Horario:</span>
+                          </span>
+                          <span className="font-semibold text-white">
+                            {(r.horarioHabitual?.horaInicio || r.horario_habitual?.horaInicio || "07:00")} - {(r.horarioHabitual?.horaFin || r.horario_habitual?.horaFin || "13:00")} hrs
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-zinc-300">
+                          <span className="flex items-center gap-1 text-zinc-400">
+                            <Truck className="w-3 h-3 text-cyan-400" />
+                            <span>Titular:</span>
+                          </span>
+                          <span className="text-zinc-200">
+                            {(() => {
+                              const camion = typeof r.camionAsignadoId === "object" && r.camionAsignadoId
+                                ? r.camionAsignadoId
+                                : camiones_disponibles.find((c) => c._id === (r.camionAsignadoId || r.camion_asignado_id));
+                              return camion ? `Unidad ${camion.numero_unidad || "S/N"}` : "Rotativo";
+                            })()}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 pt-1 border-t border-zinc-800">
+                          <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <div className="flex flex-wrap gap-1">
+                            {DIAS_SEMANA.map((dia) => {
+                              const diasActivos = (r.diasRecoleccion || r.dias_recoleccion || ["lunes", "miercoles", "viernes"]).map((d: string) => d.toLowerCase());
+                              const activo = diasActivos.includes(dia.id);
+                              return (
+                                <span
+                                  key={dia.id}
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    activo
+                                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                      : "bg-zinc-800/40 text-zinc-600 line-through opacity-40"
+                                  }`}
+                                >
+                                  {dia.etiqueta}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500 pt-1 border-t border-zinc-700/40">

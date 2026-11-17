@@ -12,6 +12,13 @@ export interface InterfazRuta extends Document {
   distancia_estimada_km: number;
   duracion_estimada_min: number;
   activa: boolean;
+  diasRecoleccion?: string[];
+  horarioHabitual?: {
+    horaInicio: string;
+    horaFin: string;
+  };
+  camionAsignadoId?: mongoose.Types.ObjectId | null;
+  conductorHabitualId?: mongoose.Types.ObjectId | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -60,6 +67,24 @@ const EsquemaRuta = new Schema<InterfazRuta>(
     activa: {
       type: Boolean,
       default: true,
+    },
+    diasRecoleccion: {
+      type: [String],
+      default: ["lunes", "miercoles", "viernes"],
+    },
+    horarioHabitual: {
+      horaInicio: { type: String, default: "07:00" },
+      horaFin: { type: String, default: "13:00" },
+    },
+    camionAsignadoId: {
+      type: Schema.Types.ObjectId,
+      ref: "Camion",
+      default: null,
+    },
+    conductorHabitualId: {
+      type: Schema.Types.ObjectId,
+      ref: "Conductor",
+      default: null,
     },
   },
   {

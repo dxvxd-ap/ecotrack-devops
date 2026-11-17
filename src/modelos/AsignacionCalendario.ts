@@ -1,13 +1,16 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface InterfazAsignacionCalendario extends Document {
-  camion_id: mongoose.Types.ObjectId;
+  camion_id?: mongoose.Types.ObjectId | null;
   ruta_id: mongoose.Types.ObjectId;
   fecha: string; // Formato YYYY-MM-DD
   hora_entrada_aprox: string; // Formato HH:MM (ej: "07:00")
   hora_salida_aprox: string; // Formato HH:MM (ej: "15:00")
   estado: "programado" | "en_progreso" | "completado" | "cancelado";
   notas?: string;
+  tipo_asignacion?: "base_recurrente" | "excepcion_dia";
+  es_anulacion?: boolean;
+  motivo_excepcion?: string;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -17,7 +20,8 @@ const EsquemaAsignacionCalendario = new Schema<InterfazAsignacionCalendario>(
     camion_id: {
       type: Schema.Types.ObjectId,
       ref: "Camion",
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     ruta_id: {
@@ -48,6 +52,20 @@ const EsquemaAsignacionCalendario = new Schema<InterfazAsignacionCalendario>(
       index: true,
     },
     notas: {
+      type: String,
+      default: "",
+    },
+    tipo_asignacion: {
+      type: String,
+      enum: ["base_recurrente", "excepcion_dia"],
+      default: "excepcion_dia",
+      index: true,
+    },
+    es_anulacion: {
+      type: Boolean,
+      default: false,
+    },
+    motivo_excepcion: {
       type: String,
       default: "",
     },

@@ -2,7 +2,7 @@
 
 import { crearPopupRuta, segmentosRuta } from "@/lib/rutas_mapa";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Maximize2, Minimize2, Plus, Minus, MoveVertical } from "lucide-react";
+import { Maximize2, Minimize2, Plus, Minus, MoveVertical, Eye, EyeOff } from "lucide-react";
 
 const COORDENADAS_GUTIERREZ_ZAMORA: [number, number] = [20.4514, -97.0886];
 
@@ -22,6 +22,7 @@ interface PropsMapaRutas {
   ajustar_a_calles: boolean;
   al_cambiar_ajuste_calles: (activo: boolean) => void;
   altura_inicial_px?: number;
+  id_ruta_activa?: string;
 }
 
 export default function MapaRutasInteractivo({
@@ -35,6 +36,7 @@ export default function MapaRutasInteractivo({
   ajustar_a_calles,
   al_cambiar_ajuste_calles,
   altura_inicial_px = 580,
+  id_ruta_activa,
 }: PropsMapaRutas) {
   const contenedor_ref = useRef<HTMLDivElement>(null);
   const mapa_ref = useRef<any>(null);
@@ -45,6 +47,16 @@ export default function MapaRutasInteractivo({
   const [calculando_tramo, fijar_calculando_tramo] = useState(false);
   const [altura_mapa, fijar_altura_mapa] = useState(altura_inicial_px);
   const [es_pantalla_completa, fijar_es_pantalla_completa] = useState(false);
+  const [mostrar_referencias, fijar_mostrar_referencias] = useState(false);
+
+  // Al cambiar o salir del modo dibujo, restaurar referencias y cerrar popups pendientes
+  useEffect(() => {
+    if (!modo_dibujo) {
+      fijar_mostrar_referencias(false);
+    } else if (mapa_ref.current) {
+      mapa_ref.current.closePopup();
+    }
+  }, [modo_dibujo]);
 
   // Reajustar dimensiones internas de Leaflet cuando cambia el tamaño del contenedor
   useEffect(() => {
@@ -193,21 +205,51 @@ export default function MapaRutasInteractivo({
     if (!mapa_listo || !capa_rutas_guardadas_ref.current) return;
     capa_rutas_guardadas_ref.current.clearLayers();
 
+    // 1. Modo de enfoque: ocultar rutas existentes mientras se traza, a menos que se activen como referencia
+    if (modo_dibujo && !mostrar_referencias) {
+      return;
+    }
+
     import("leaflet").then((mod) => {
       const L = mod.default || mod;
 
+      // Limpiar preventivamente para evitar duplicados en renderizados concurrentes
+      capa_rutas_guardadas_ref.current?.clearLayers();
+
       rutas_existentes.forEach((ruta) => {
+        // En modo edición/trazado, excluir la ruta activa si se está editando para no solaparla consigo misma
+        if (
+          modo_dibujo &&
+          id_ruta_activa &&
+          (ruta._id === id_ruta_activa || ruta.id_ruta === id_ruta_activa)
+        ) {
+          return;
+        }
+
         const segmentos = segmentosRuta(ruta?.trazado_geojson);
         if (segmentos.length) {
+          const es_referencia = modo_dibujo && mostrar_referencias;
+
+          // 2. Prevención de clics accidentales:
+          // Cuando es referencia, usar opacidad 0.25, trazo más delgado y deshabilitar interactividad
           const linea = L.polyline(segmentos, {
-            color: ruta.color_mapa || "#2f63ff", weight: 5, opacity: 0.85,
+            color: ruta.color_mapa || "#2f63ff",
+            weight: es_referencia ? 3 : 5,
+            opacity: es_referencia ? 0.25 : 0.85,
+            dashArray: es_referencia ? "6, 6" : undefined,
+            interactive: !es_referencia, // Evita capturar eventos de ratón para que los clics lleguen al mapa
           });
-          linea.bindPopup(crearPopupRuta(ruta));
+
+          // Solo vincular popup si NO está en modo trazado/referencia
+          if (!es_referencia) {
+            linea.bindPopup(crearPopupRuta(ruta));
+          }
+
           capa_rutas_guardadas_ref.current?.addLayer(linea);
         }
       });
     });
-  }, [mapa_listo, rutas_existentes]);
+  }, [mapa_listo, rutas_existentes, modo_dibujo, mostrar_referencias, id_ruta_activa]);
 
   // Renderizar la ruta actual en dibujo
   useEffect(() => {
@@ -341,6 +383,52 @@ export default function MapaRutasInteractivo({
         </div>
       </div>
 
+      {/* 4. Indicador visual discreto cuando el modo trazado está activo */}
+      {modo_dibujo && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 bg-blue-950/40 border border-blue-500/30 rounded-xl text-xs font-mono text-zinc-200 shadow-sm transition-all">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+            </span>
+            <span className="text-[11px] text-zinc-300">
+              {mostrar_referencias ? (
+                <>
+                  <strong className="text-blue-300 font-semibold">Modo trazado activo:</strong> Mostrando rutas de referencia (opacidad 0.25, clics deshabilitados).
+                </>
+              ) : (
+                <>
+                  <strong className="text-blue-300 font-semibold">Modo trazado:</strong> rutas existentes ocultas para evitar solapamiento.
+                </>
+              )}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fijar_mostrar_referencias(!mostrar_referencias)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${
+              mostrar_referencias
+                ? "bg-blue-600 text-white border-blue-400 shadow-sm"
+                : "bg-zinc-800/90 text-zinc-300 border-zinc-700 hover:text-white hover:bg-zinc-700"
+            }`}
+            title="Alternar rutas guardadas como referencia visual tenue en opacidad 0.25"
+          >
+            {mostrar_referencias ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5" />
+                <span>Ocultar rutas de referencia</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5" />
+                <span>Mostrar rutas de referencia</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Contenedor Físico del Mapa con Altura Dinámica */}
       <div
         style={{
@@ -366,6 +454,22 @@ export default function MapaRutasInteractivo({
             <span className={`w-2 h-2 rounded-full ${ajustar_a_calles ? "bg-white animate-pulse" : "bg-zinc-500"}`} />
             <span>{ajustar_a_calles ? "Modo: Seguir Calles (Vehicular)" : "Modo: Línea Libre"}</span>
           </button>
+
+          {modo_dibujo && (
+            <button
+              type="button"
+              onClick={() => fijar_mostrar_referencias(!mostrar_referencias)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono backdrop-blur-md shadow-lg border transition-all ${
+                mostrar_referencias
+                  ? "bg-blue-600/90 text-white border-blue-400"
+                  : "bg-zinc-900/90 text-zinc-300 border-zinc-700 hover:text-white"
+              }`}
+              title="Alterna la visibilidad de las rutas previas como guía con baja opacidad"
+            >
+              {mostrar_referencias ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              <span>{mostrar_referencias ? "Ocultar Ref." : "Rutas Referencia (25%)"}</span>
+            </button>
+          )}
 
           {calculando_tramo && (
             <div className="flex items-center gap-1.5 bg-black/90 text-amber-400 border border-amber-500/40 px-3 py-1.5 rounded-lg text-xs font-mono animate-pulse">

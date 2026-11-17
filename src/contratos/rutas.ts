@@ -4,7 +4,23 @@ export class ErrorRuta extends Error {
 }
 type Objeto = Record<string, unknown>;
 export type SelectorRuta = { _id?: string; id_ruta?: string };
-const camposDatos = ['nombre', 'descripcion', 'trazado_geojson', 'color_mapa', 'distancia_estimada_km', 'duracion_estimada_min', 'activa'];
+const camposDatos = [
+  'nombre',
+  'descripcion',
+  'trazado_geojson',
+  'color_mapa',
+  'distancia_estimada_km',
+  'duracion_estimada_min',
+  'activa',
+  'diasRecoleccion',
+  'horarioHabitual',
+  'camionAsignadoId',
+  'conductorHabitualId',
+  'dias_recoleccion',
+  'horario_habitual',
+  'camion_asignado_id',
+  'conductor_habitual_id',
+];
 function invalida(): never { throw new ErrorRuta(400, 'ENTRADA_INVALIDA', 'Los datos o identificadores de la ruta no son válidos'); }
 function objeto(valor: unknown): valor is Objeto { return !!valor && typeof valor === 'object' && !Array.isArray(valor); }
 function texto(valor: unknown, maximo: number, vacio = false): string {
@@ -39,8 +55,37 @@ function datos(cuerpo: Objeto): Objeto {
     } else if (campo === 'activa') {
       if (typeof valor !== 'boolean') return invalida();
       salida[campo] = valor;
-    } else {
+    } else if (campo === 'diasRecoleccion' || campo === 'dias_recoleccion') {
+      if (!Array.isArray(valor) || !valor.every(d => typeof d === 'string' && d.trim().length > 0 && d.trim().length <= 25)) return invalida();
+      salida[campo] = valor.map(d => (d as string).trim().toLowerCase());
+    } else if (campo === 'horarioHabitual' || campo === 'horario_habitual') {
+      if (!objeto(valor)) return invalida();
+      const inicio = (valor.horaInicio ?? valor.hora_inicio) as unknown;
+      const fin = (valor.horaFin ?? valor.hora_fin) as unknown;
+      if (typeof inicio !== 'string' || typeof fin !== 'string') return invalida();
+      const regexHora = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (!regexHora.test(inicio.trim()) || !regexHora.test(fin.trim())) return invalida();
+      salida[campo] = { horaInicio: inicio.trim(), horaFin: fin.trim() };
+    } else if (campo === 'camionAsignadoId' || campo === 'camion_asignado_id') {
+      if (valor === null || valor === '' || valor === undefined) {
+        salida[campo] = null;
+      } else if (typeof valor === 'object' && valor !== null && '_id' in (valor as Objeto)) {
+        salida[campo] = valor;
+      } else {
+        salida[campo] = objectId(valor);
+      }
+    } else if (campo === 'conductorHabitualId' || campo === 'conductor_habitual_id') {
+      if (valor === null || valor === '' || valor === undefined) {
+        salida[campo] = null;
+      } else if (typeof valor === 'object' && valor !== null && '_id' in (valor as Objeto)) {
+        salida[campo] = valor;
+      } else {
+        salida[campo] = objectId(valor);
+      }
+    } else if (campo === 'distancia_estimada_km' || campo === 'duracion_estimada_min') {
       if (typeof valor !== 'number' || !Number.isFinite(valor) || valor < 0) return invalida();
+      salida[campo] = valor;
+    } else {
       salida[campo] = valor;
     }
   }

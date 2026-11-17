@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Skeleton from "react-loading-skeleton";
 import {
   Users,
   Shield,
@@ -308,7 +309,34 @@ export default function PaginaGestionUsuariosRoles() {
           </button>
         </div>
 
-        {usuarios.length === 0 ? (
+        {cargando ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-zinc-950/60 font-mono text-zinc-400 uppercase text-[10px] border-b border-zinc-800">
+                <tr>
+                  <th className="p-3">Nombre</th>
+                  <th className="p-3">Correo Electrónico</th>
+                  <th className="p-3">Estado de Cuenta</th>
+                  <th className="p-3">Rol Asignado</th>
+                  <th className="p-3">Acceso Dashboard</th>
+                  <th className="p-3 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <tr key={i}>
+                    <td className="p-3"><Skeleton width={140} height={16} /></td>
+                    <td className="p-3"><Skeleton width={180} height={14} /></td>
+                    <td className="p-3"><Skeleton width={120} height={14} /></td>
+                    <td className="p-3"><Skeleton width={80} height={20} borderRadius={4} /></td>
+                    <td className="p-3"><Skeleton width={60} height={20} borderRadius={4} /></td>
+                    <td className="p-3 text-right"><Skeleton width={50} height={24} borderRadius={6} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : usuarios.length === 0 ? (
           <div className="py-12 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
             No se han registrado usuarios. Usa el botón "Pre-asignar Usuario por Correo" arriba.
           </div>

@@ -63,4 +63,59 @@ nextjs-portal,
   margin-bottom: 70px !important;
 }
 
+/* Soporte de Tema Claro para el Dashboard */
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+[data-theme="light"] .bg-zinc-950 {
+  background-color: #f8fafc !important;
+}
+
+[data-theme="light"] .bg-zinc-900 {
+  background-color: #ffffff !important;
+}
+
+[data-theme="light"] .bg-zinc-800\/60,
+[data-theme="light"] .bg-zinc-800\/50,
+[data-theme="light"] .bg-zinc-800\/40,
+[data-theme="light"] .bg-zinc-800\/30 {
+  background-color: #f1f5f9 !important;
+}
+
+[data-theme="light"] .border-zinc-800,
+[data-theme="light"] .border-zinc-800\/80,
+[data-theme="light"] .border-zinc-700,
+[data-theme="light"] .border-zinc-700\/60,
+[data-theme="light"] .border-zinc-700\/50,
+[data-theme="light"] .border-zinc-700\/40 {
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .text-white {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .text-zinc-200 {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .text-zinc-300 {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .text-zinc-400 {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .text-zinc-500 {
+  color: #64748b !important;
+}
+
+[data-theme="light"] aside {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+
 

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import Skeleton from "react-loading-skeleton";
 import {
   Layers,
   MapPin,
@@ -19,8 +20,8 @@ const VisorCartografico = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[620px] w-full bg-zinc-900 animate-pulse rounded-xl flex items-center justify-center font-mono text-xs text-zinc-500">
-        Cargando visor de rutas en Gutiérrez Zamora, Ver...
+      <div className="h-[620px] w-full rounded-xl overflow-hidden">
+        <Skeleton height={620} borderRadius="0.75rem" />
       </div>
     ),
   }
@@ -161,7 +162,26 @@ export default function PaginaVisorRutas() {
             )}
 
             {/* Lista de Rutas */}
-            {rutas_filtradas.length === 0 ? (
+            {cargando ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="p-3 bg-zinc-800/40 border border-zinc-700/40 rounded-xl space-y-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Skeleton circle width={10} height={10} />
+                      <Skeleton width="60%" height={14} containerClassName="flex-1" />
+                    </div>
+                    <Skeleton width="80%" height={12} />
+                    <div className="flex items-center justify-between pt-1 border-t border-zinc-700/30">
+                      <Skeleton width={70} height={10} />
+                      <Skeleton width={60} height={10} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : rutas_filtradas.length === 0 ? (
               <div className="py-12 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
                 {rutas.length === 0
                   ? "No hay rutas guardadas aún. Puedes trazar la primera en la sección 'Trazado de Rutas'."

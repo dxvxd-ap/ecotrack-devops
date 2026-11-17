@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Skeleton from "react-loading-skeleton";
 import {
   Truck,
   UserCheck,
@@ -186,7 +187,36 @@ export default function PaginaGestionFlota() {
               <span>UNIDADES ACTIVAS EN PARQUE VEHICULAR ({camiones.length})</span>
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {cargando ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="p-4 bg-zinc-800/60 border border-zinc-700/60 rounded-xl space-y-2.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <Skeleton width={80} height={18} />
+                      <Skeleton width={60} height={20} borderRadius={4} />
+                    </div>
+                    <Skeleton width="50%" height={14} />
+                    <Skeleton width="70%" height={12} />
+                    <div className="p-2 bg-zinc-900/60 rounded border border-zinc-700/40 flex items-center justify-between">
+                      <Skeleton width={90} height={12} />
+                      <Skeleton width={110} height={12} />
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <Skeleton width={120} height={10} />
+                      <Skeleton width={60} height={10} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : camiones.length === 0 ? (
+              <div className="py-8 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
+                No hay unidades registradas en la flota.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {camiones.map((c) => (
                 <div
                   key={c._id}
@@ -230,6 +260,7 @@ export default function PaginaGestionFlota() {
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           {/* Listado de Conductores */}
@@ -238,24 +269,45 @@ export default function PaginaGestionFlota() {
               CONDUCTORES REGISTRADOS ({conductores.length})
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {conductores.map((cond) => (
-                <div
-                  key={cond._id}
-                  className="p-3.5 bg-zinc-800/40 border border-zinc-700/40 rounded-xl flex items-center justify-between text-xs"
-                >
-                  <div className="space-y-0.5">
-                    <div className="font-semibold text-white">{cond.nombre_completo}</div>
-                    <div className="text-[11px] font-mono text-zinc-400">
-                      Lic: {cond.numero_licencia} • Tel: {cond.telefono}
+            {cargando ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="p-3.5 bg-zinc-800/40 border border-zinc-700/40 rounded-xl flex items-center justify-between text-xs gap-3"
+                  >
+                    <div className="space-y-1.5 flex-1">
+                      <Skeleton width="60%" height={14} containerClassName="flex-1" />
+                      <Skeleton width="80%" height={12} containerClassName="flex-1" />
                     </div>
+                    <Skeleton width={65} height={20} borderRadius={4} />
                   </div>
-                  <span className="text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded">
-                    {cond.camion_asignado_id ? "Asignado" : "Disponible"}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : conductores.length === 0 ? (
+              <div className="py-8 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
+                No hay conductores registrados.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {conductores.map((cond) => (
+                  <div
+                    key={cond._id}
+                    className="p-3.5 bg-zinc-800/40 border border-zinc-700/40 rounded-xl flex items-center justify-between text-xs"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-white">{cond.nombre_completo}</div>
+                      <div className="text-[11px] font-mono text-zinc-400">
+                        Lic: {cond.numero_licencia} • Tel: {cond.telefono}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded">
+                      {cond.camion_asignado_id ? "Asignado" : "Disponible"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

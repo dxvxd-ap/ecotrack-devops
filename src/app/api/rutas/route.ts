@@ -34,8 +34,12 @@ async function verificarIndice() {
 export async function GET() {
   try {
     await conectar_base_datos();
-    const rutas = await ModeloRuta.find({ activa: true }).sort({ fecha_creacion: -1 });
-    return respuesta(rutas.filter(r => esRutaPublicable(r.toObject ? r.toObject() : r)));
+    let consulta: any = ModeloRuta.find({ activa: true });
+    if (typeof consulta?.populate === 'function') {
+      consulta = consulta.populate('camionAsignadoId', 'numero_unidad modelo matricula estado');
+    }
+    const rutas = await consulta.sort({ fecha_creacion: -1 });
+    return respuesta(rutas.filter((r: any) => esRutaPublicable(r.toObject ? r.toObject() : r)));
   } catch (error: unknown) { return fallo(error); }
 }
 export async function POST(peticion: NextRequest) {
@@ -63,8 +67,11 @@ export async function PUT(peticion: NextRequest) {
     if (resultante.activa === true) validarRutaActiva(resultante);
     // Comparación atómica de todos los campos que participan en la validación.
     // No depende de __v ni requiere migrar documentos existentes.
-    const campos = ['id_ruta', 'nombre', 'descripcion', 'trazado_geojson', 'color_mapa',
-      'distancia_estimada_km', 'duracion_estimada_min', 'activa'];
+    const campos = [
+      'id_ruta', 'nombre', 'descripcion', 'trazado_geojson', 'color_mapa',
+      'distancia_estimada_km', 'duracion_estimada_min', 'activa',
+      'diasRecoleccion', 'horarioHabitual', 'camionAsignadoId', 'conductorHabitualId'
+    ];
     const condiciones = campos.map(campo => Object.hasOwn(anterior, campo)
       ? { [campo]: { $eq: (anterior as Record<string, unknown>)[campo] } }
       : { [campo]: { $exists: false } });

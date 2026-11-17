@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Skeleton from "react-loading-skeleton";
 import {
   Truck,
   MapPin,
@@ -107,12 +108,18 @@ export default function PaginaResumenDashboard() {
             <Truck className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="texto-anton text-3xl text-white">
-              {cargando ? "--" : resumen.camiones_en_ruta}
-            </span>
-            <span className="text-xs text-zinc-500 font-mono">
-              / {resumen.total_camiones} unidades
-            </span>
+            {cargando ? (
+              <Skeleton width={80} height={32} />
+            ) : (
+              <>
+                <span className="texto-anton text-3xl text-white">
+                  {resumen.camiones_en_ruta}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">
+                  / {resumen.total_camiones} unidades
+                </span>
+              </>
+            )}
           </div>
           <p className="text-[11px] text-emerald-400 flex items-center gap-1 font-mono">
             <CheckCircle className="w-3 h-3" /> Conductor asignado 1:1
@@ -126,10 +133,16 @@ export default function PaginaResumenDashboard() {
             <MapPin className="w-4 h-4 text-blue-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="texto-anton text-3xl text-white">
-              {cargando ? "--" : resumen.total_rutas}
-            </span>
-            <span className="text-xs text-zinc-500 font-mono">en catálogo</span>
+            {cargando ? (
+              <Skeleton width={80} height={32} />
+            ) : (
+              <>
+                <span className="texto-anton text-3xl text-white">
+                  {resumen.total_rutas}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">en catálogo</span>
+              </>
+            )}
           </div>
           <p className="text-[11px] text-zinc-400 font-mono">
             Trazado GeoJSON en MongoDB
@@ -143,10 +156,16 @@ export default function PaginaResumenDashboard() {
             <Calendar className="w-4 h-4 text-amber-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="texto-anton text-3xl text-white">
-              {cargando ? "--" : resumen.asignaciones_hoy}
-            </span>
-            <span className="text-xs text-zinc-500 font-mono">programados</span>
+            {cargando ? (
+              <Skeleton width={80} height={32} />
+            ) : (
+              <>
+                <span className="texto-anton text-3xl text-white">
+                  {resumen.asignaciones_hoy}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">programados</span>
+              </>
+            )}
           </div>
           <p className="text-[11px] text-amber-400 font-mono">
             Calendario de logística activo
@@ -160,10 +179,16 @@ export default function PaginaResumenDashboard() {
             <Bell className="w-4 h-4 text-purple-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="texto-anton text-3xl text-white">
-              {cargando ? "--" : resumen.alertas_emitidas}
-            </span>
-            <span className="text-xs text-zinc-500 font-mono">disparados</span>
+            {cargando ? (
+              <Skeleton width={80} height={32} />
+            ) : (
+              <>
+                <span className="texto-anton text-3xl text-white">
+                  {resumen.alertas_emitidas}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">disparados</span>
+              </>
+            )}
           </div>
           <p className="text-[11px] text-purple-400 font-mono">
             Proximidad por GPS evaluada
@@ -188,7 +213,22 @@ export default function PaginaResumenDashboard() {
             </Link>
           </div>
 
-          {asignaciones_recientes.length === 0 ? (
+          {cargando ? (
+            <div className="space-y-3">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="p-4 bg-zinc-800/50 border border-zinc-700/60 rounded-xl flex items-center justify-between text-xs gap-4"
+                >
+                  <div className="space-y-2 flex-1">
+                    <Skeleton width="60%" height={16} containerClassName="flex-1" />
+                    <Skeleton width="40%" height={12} containerClassName="flex-1" />
+                  </div>
+                  <Skeleton width={80} height={24} borderRadius={6} />
+                </div>
+              ))}
+            </div>
+          ) : asignaciones_recientes.length === 0 ? (
             <div className="py-10 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl">
               No hay turnos registrados en este momento.
             </div>

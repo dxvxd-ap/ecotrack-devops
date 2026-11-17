@@ -17,7 +17,17 @@ export interface ColeccionRutas {
   features: Array<{
     type: 'Feature';
     geometry: GeometriaRuta;
-    properties: { id: string; nombre: string; color: string; descripcion?: string; distanciaKm?: number | null; duracionMin?: number | null };
+    properties: {
+      id: string;
+      nombre: string;
+      color: string;
+      descripcion?: string;
+      distanciaKm?: number | null;
+      duracionMin?: number | null;
+      diasRecoleccion?: string[];
+      horarioHabitual?: { horaInicio: string; horaFin: string };
+      camionAsignado?: any;
+    };
   }>;
 }
 type Objeto = Record<string, unknown>;
@@ -63,6 +73,9 @@ export function normalizarRutas(respuesta: unknown): ColeccionRutas {
       descripcion: typeof r.descripcion === 'string' ? r.descripcion : '',
       distanciaKm: typeof r.distancia_estimada_km === 'number' && Number.isFinite(r.distancia_estimada_km) && r.distancia_estimada_km > 0 ? r.distancia_estimada_km : null,
       duracionMin: typeof r.duracion_estimada_min === 'number' && Number.isFinite(r.duracion_estimada_min) && r.duracion_estimada_min > 0 ? r.duracion_estimada_min : null,
+      diasRecoleccion: Array.isArray(r.diasRecoleccion) ? r.diasRecoleccion : Array.isArray(r.dias_recoleccion) ? r.dias_recoleccion : ['lunes', 'miercoles', 'viernes'],
+      horarioHabitual: r.horarioHabitual ?? r.horario_habitual ?? { horaInicio: '07:00', horaFin: '13:00' },
+      camionAsignado: r.camionAsignadoId ?? r.camion_asignado_id ?? null,
     } });
   }
   return { type: 'FeatureCollection', features };

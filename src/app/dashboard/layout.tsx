@@ -12,6 +12,8 @@ import {
   Shield,
   Layers,
 } from "lucide-react";
+import { ProveedorTema } from "@/context/TemaContext";
+import { BotonTema } from "@/componentes/dashboard/BotonTema";
 
 export default function DisenoDashboard({
   children,
@@ -19,9 +21,10 @@ export default function DisenoDashboard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex font-sans">
-      {/* Barra Lateral Izquierda (Sidebar Utilitaria) */}
-      <aside className="w-64 border-r border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between shrink-0">
+    <ProveedorTema>
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex font-sans">
+        {/* Barra Lateral Izquierda (Sidebar Utilitaria) */}
+        <aside className="w-64 border-r border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between shrink-0">
         <div>
           {/* Logo y Encabezado */}
           <div className="p-5 border-b border-zinc-800/80 flex items-center justify-between">
@@ -139,9 +142,26 @@ export default function DisenoDashboard({
 
       {/* Contenedor Principal de Vistas */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        {children}
+        {/* Header Superior del Dashboard */}
+        <header className="h-14 border-b border-zinc-800/80 px-8 flex items-center justify-between shrink-0 bg-zinc-900/40 backdrop-blur sticky top-0 z-30">
+          <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="hidden sm:inline">PANEL DE CONTROL</span>
+            <span className="text-zinc-600">//</span>
+            <span className="text-zinc-300">GUTIÉRREZ ZAMORA, VER.</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <BotonTema />
+          </div>
+        </header>
+
+        <main className="flex-1">
+          {children}
+        </main>
       </div>
     </div>
+    </ProveedorTema>
   );
 }
 
