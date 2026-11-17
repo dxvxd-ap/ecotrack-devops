@@ -22,7 +22,7 @@ export default function DisenoDashboard({
 }) {
   return (
     <ProveedorTema>
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex font-sans">
+      <div className="w-full min-h-screen bg-zinc-950 text-zinc-100 flex font-sans">
         {/* Barra Lateral Izquierda (Sidebar Utilitaria) */}
         <aside className="w-64 border-r border-zinc-800/80 bg-zinc-900/60 flex flex-col justify-between shrink-0">
         <div>

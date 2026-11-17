@@ -63,36 +63,59 @@ nextjs-portal,
   margin-bottom: 70px !important;
 }
 
-/* Soporte de Tema Claro para el Dashboard */
-[data-theme="light"] {
+/* ==========================================================================
+   Soporte Integral de Tema Claro / Oscuro para el Dashboard
+   ========================================================================== */
+html, body {
+  min-height: 100vh;
+  width: 100%;
+}
+
+[data-theme="light"],
+[data-theme="light"] body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
   color-scheme: light;
 }
 
-[data-theme="light"] .bg-zinc-950 {
+[data-theme="dark"],
+[data-theme="dark"] body {
+  background-color: #09090b !important;
+  color: #f4f4f5 !important;
+  color-scheme: dark;
+}
+
+/* Fondos estructurales y tarjetas */
+[data-theme="light"] [class*="bg-zinc-950"] {
   background-color: #f8fafc !important;
 }
 
-[data-theme="light"] .bg-zinc-900 {
+[data-theme="light"] [class*="bg-zinc-900"] {
   background-color: #ffffff !important;
 }
 
-[data-theme="light"] .bg-zinc-800\/60,
-[data-theme="light"] .bg-zinc-800\/50,
-[data-theme="light"] .bg-zinc-800\/40,
-[data-theme="light"] .bg-zinc-800\/30 {
+[data-theme="light"] [class*="bg-zinc-800"] {
   background-color: #f1f5f9 !important;
 }
 
-[data-theme="light"] .border-zinc-800,
-[data-theme="light"] .border-zinc-800\/80,
-[data-theme="light"] .border-zinc-700,
-[data-theme="light"] .border-zinc-700\/60,
-[data-theme="light"] .border-zinc-700\/50,
-[data-theme="light"] .border-zinc-700\/40 {
+/* Tarjetas con relieve sutil en tema blanco */
+[data-theme="light"] .bg-zinc-900 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04) !important;
+}
+
+/* Bordes en tema claro */
+[data-theme="light"] [class*="border-zinc-800"],
+[data-theme="light"] [class*="border-zinc-700"] {
   border-color: #e2e8f0 !important;
 }
 
+/* Textos neutrales */
 [data-theme="light"] .text-white {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .text-zinc-100 {
   color: #0f172a !important;
 }
 
@@ -112,9 +135,75 @@ nextjs-portal,
   color: #64748b !important;
 }
 
+[data-theme="light"] .text-zinc-600 {
+  color: #94a3b8 !important;
+}
+
+/* Colores de acento con alto contraste para fondo blanco (WCAG AA) */
+[data-theme="light"] .text-amber-400 {
+  color: #b45309 !important; /* amber-700 */
+}
+
+[data-theme="light"] .text-purple-400 {
+  color: #6d28d9 !important; /* purple-700 */
+}
+
+[data-theme="light"] .text-emerald-400 {
+  color: #047857 !important; /* emerald-700 */
+}
+
+[data-theme="light"] .text-blue-400 {
+  color: #1d4ed8 !important; /* blue-700 */
+}
+
+[data-theme="light"] .text-cyan-400 {
+  color: #0369a1 !important; /* sky-700 */
+}
+
+[data-theme="light"] .text-teal-400 {
+  color: #0f766e !important; /* teal-700 */
+}
+
+[data-theme="light"] .text-rose-400 {
+  color: #be123c !important; /* rose-700 */
+}
+
+/* Estructura Sidebar y Header */
 [data-theme="light"] aside {
   background-color: #ffffff !important;
   border-color: #e2e8f0 !important;
+  box-shadow: 1px 0 3px 0 rgb(0 0 0 / 0.03) !important;
+}
+
+[data-theme="light"] header {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Botones secundarios e interactivos en tema claro */
+[data-theme="light"] [class*="hover:bg-zinc-700"]:hover,
+[data-theme="light"] [class*="hover:bg-zinc-800"]:hover {
+  background-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] [class*="hover:text-white"]:hover {
+  color: #0f172a !important;
+}
+
+/* Formularios: inputs, selects y textareas */
+[data-theme="light"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] input:focus,
+[data-theme="light"] select:focus,
+[data-theme="light"] textarea:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
 }
 
 
