@@ -143,10 +143,14 @@ export default function PaginaGestionRutas() {
   const manejar_actualizacion_trazado = (
     nuevas_coords: [number, number][],
     claves: [number, number][],
-    _distancia: number
+    _distancia: number,
+    tramos?: [number, number][][]
   ) => {
     fijar_coordenadas_detalle(nuevas_coords);
     fijar_puntos_clave(claves);
+    if (tramos !== undefined) {
+      fijar_tramos_historicos(tramos);
+    }
   };
 
   const deshacer_ultimo_punto = () => {
@@ -154,14 +158,33 @@ export default function PaginaGestionRutas() {
       limpiar_trazado_actual();
       return;
     }
-    // Quitar el último punto clave y reiniciar el detalle
-    fijar_puntos_clave((prev) => prev.slice(0, -1));
-    fijar_coordenadas_detalle((prev) => prev.slice(0, Math.max(1, Math.floor(prev.length * 0.7))));
+
+    const nuevos_claves = puntos_clave.slice(0, -1);
+    const nuevos_tramos = tramos_historicos.slice(0, -1);
+
+    // Reconstruir fielmente las coordenadas de calle uniendo los tramos restantes
+    let nuevas_coords: [number, number][] = [];
+    if (nuevos_tramos.length === 0) {
+      nuevas_coords = nuevos_claves.length > 0 ? [nuevos_claves[0]] : [];
+    } else {
+      nuevos_tramos.forEach((tramo, idx) => {
+        if (idx === 0) {
+          nuevas_coords.push(...tramo);
+        } else {
+          nuevas_coords.push(...tramo.slice(1));
+        }
+      });
+    }
+
+    fijar_puntos_clave(nuevos_claves);
+    fijar_tramos_historicos(nuevos_tramos);
+    fijar_coordenadas_detalle(nuevas_coords);
   };
 
   const limpiar_trazado_actual = () => {
     fijar_puntos_clave([]);
     fijar_coordenadas_detalle([]);
+    fijar_tramos_historicos([]);
     fijar_nombre_ruta("");
     fijar_id_ruta("");
     fijar_descripcion_ruta("");
@@ -198,13 +221,12 @@ export default function PaginaGestionRutas() {
         ([lon, lat]: [number, number]) => [lat, lon]
       );
       fijar_coordenadas_detalle(coords_lat_lng);
-      // Para puntos clave, usar el inicio y fin o una muestra representativa
       if (coords_lat_lng.length > 0) {
-        fijar_puntos_clave([
-          coords_lat_lng[0],
-          ...(coords_lat_lng.length > 2 ? [coords_lat_lng[Math.floor(coords_lat_lng.length / 2)]] : []),
-          coords_lat_lng[coords_lat_lng.length - 1],
-        ]);
+        fijar_puntos_clave([coords_lat_lng[0], coords_lat_lng[coords_lat_lng.length - 1]]);
+        fijar_tramos_historicos([coords_lat_lng]);
+      } else {
+        fijar_puntos_clave([]);
+        fijar_tramos_historicos([]);
       }
     }
 
@@ -354,6 +376,7 @@ export default function PaginaGestionRutas() {
               coordenadas_trazado={coordenadas_detalle}
               al_cambiar_coordenadas={manejar_actualizacion_trazado}
               puntos_clave={puntos_clave}
+              tramos_historicos={tramos_historicos}
               color_activo={color_seleccionado}
               modo_dibujo={modo_dibujo}
               ajustar_a_calles={ajustar_a_calles}

@@ -150,31 +150,39 @@ export default function MapaRutasInteractivo({
   // Manejar clic en el mapa para trazar
   const manejar_clic_mapa = useCallback(
     async (e: any) => {
-      if (!modo_dibujo) return;
+      if (!modo_dibujo || calculando_tramo) return;
 
       const nuevo_punto: [number, number] = [e.latlng.lat, e.latlng.lng];
 
       if (puntos_clave.length === 0) {
-        al_cambiar_coordenadas([nuevo_punto], [nuevo_punto], 0, [[nuevo_punto]]);
+        // Primer punto: punto de partida (0 tramos aún)
+        al_cambiar_coordenadas([nuevo_punto], [nuevo_punto], 0, []);
       } else {
         const ultimo_clave = puntos_clave[puntos_clave.length - 1];
         const nuevos_claves = [...puntos_clave, nuevo_punto];
 
         if (ajustar_a_calles) {
           fijar_calculando_tramo(true);
-          const { puntos: tramo_calle, distancia } = await calcular_tramo_calles(
-            ultimo_clave,
-            nuevo_punto
-          );
-          fijar_calculando_tramo(false);
+          try {
+            const { puntos: tramo_calle, distancia } = await calcular_tramo_calles(
+              ultimo_clave,
+              nuevo_punto
+            );
 
-          const coordenadas_unidas = [
-            ...coordenadas_trazado,
-            ...tramo_calle.slice(1),
-          ];
+            // Garantizar que el tramo comience en el último punto clave
+            const tramo_normalizado = tramo_calle.length > 0 ? tramo_calle : [ultimo_clave, nuevo_punto];
+            const nuevos_tramos = [...tramos_historicos, tramo_normalizado];
 
-          const nuevos_tramos = [...tramos_historicos, tramo_calle];
-          al_cambiar_coordenadas(coordenadas_unidas, nuevos_claves, distancia, nuevos_tramos);
+            // Reconstruir coordenadas limpias uniendo tramos de forma continua
+            const coordenadas_unidas = [
+              ...coordenadas_trazado,
+              ...tramo_normalizado.slice(1),
+            ];
+
+            al_cambiar_coordenadas(coordenadas_unidas, nuevos_claves, distancia, nuevos_tramos);
+          } finally {
+            fijar_calculando_tramo(false);
+          }
         } else {
           const tramo_directo: [number, number][] = [ultimo_clave, nuevo_punto];
           const nuevos_tramos = [...tramos_historicos, tramo_directo];
@@ -187,7 +195,7 @@ export default function MapaRutasInteractivo({
         }
       }
     },
-    [modo_dibujo, puntos_clave, coordenadas_trazado, tramos_historicos, ajustar_a_calles, al_cambiar_coordenadas]
+    [modo_dibujo, calculando_tramo, puntos_clave, coordenadas_trazado, tramos_historicos, ajustar_a_calles, al_cambiar_coordenadas]
   );
 
   useEffect(() => {
