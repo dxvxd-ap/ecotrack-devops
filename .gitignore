@@ -53,9 +53,9 @@ yarn-error.log*
 /apps/ciudadano/public/manifest-test.json
 
 # Otros
-text.txt 
-./agents
-AGENTS.md 
-datos_locales_respaldo.json
+text.txt
+/agents
+AGENTS.md
 datos_locales_respaldo.example.json
-/docs 
+datos_locales_respaldo.json
+/docs/
