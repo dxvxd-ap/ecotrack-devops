@@ -51,3 +51,11 @@ yarn-error.log*
 /apps/ciudadano/public/diag-*.html
 /apps/ciudadano/public/test-icon.html
 /apps/ciudadano/public/manifest-test.json
+
+# Otros
+text.txt 
+./agents
+AGENTS.md 
+datos_locales_respaldo.json
+datos_locales_respaldo.example.json
+/docs 
