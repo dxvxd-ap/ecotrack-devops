@@ -1,0 +1,22 @@
+[
+  {
+    "id_ruta": "DEV-FICTICIA-01",
+    "nombre": "Ruta ficticia de desarrollo 01",
+    "descripcion": "Datos sintéticos de prueba. No representan un servicio municipal.",
+    "trazado_geojson": {"type": "LineString", "coordinates": [[-97.0886, 20.4514], [-97.0876, 20.4524]]},
+    "color_mapa": "#047857",
+    "distancia_estimada_km": 0.15,
+    "duracion_estimada_min": 2,
+    "activa": true
+  },
+  {
+    "id_ruta": "DEV-FICTICIA-02",
+    "nombre": "Ruta ficticia de desarrollo 02",
+    "descripcion": "Datos sintéticos de prueba. No representan un servicio municipal.",
+    "trazado_geojson": {"type": "MultiLineString", "coordinates": [[[-97.0866, 20.4504], [-97.0856, 20.4514]]]},
+    "color_mapa": "#2563eb",
+    "distancia_estimada_km": 0.15,
+    "duracion_estimada_min": 2,
+    "activa": true
+  }
+]

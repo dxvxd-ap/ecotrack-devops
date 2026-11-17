@@ -1,0 +1,1221 @@
+diff --git a/package.json b/package.json
+index 58b7e4e..be70472 100644
+--- a/package.json
++++ b/package.json
+@@ -3,6 +3,7 @@
+   "version": "1.0.0",
+   "private": true,
+   "scripts": {
++    "test": "node --test tests/*.test.cjs",
+     "dev": "next dev",
+     "build": "next build",
+     "start": "next start"
+diff --git a/src/app/api/roles/route.ts b/src/app/api/roles/route.ts
+index 3e58548..d1da6cc 100644
+--- a/src/app/api/roles/route.ts
++++ b/src/app/api/roles/route.ts
+@@ -1,6 +1,8 @@
+ import { NextResponse, NextRequest } from "next/server";
+ import { conectar_base_datos } from "@/lib/base_datos";
+ import { ModeloRol } from "@/modelos/Rol";
++import { autorizar_administracion, respuesta_error_administrativo, ROLES_CONOCIDOS,
++  texto_opcional, ErrorAdministrativo } from "@/lib/autorizacion";
+ 
+ const ROLES_PREDETERMINADOS = [
+   {
+@@ -63,6 +65,7 @@ const ROLES_PREDETERMINADOS = [
+ 
+ export async function GET() {
+   try {
++    await autorizar_administracion("roles:ver");
+     try {
+       await conectar_base_datos();
+       const roles_db = await ModeloRol.find().sort({ es_sistema: -1, nombre: 1 });
+@@ -74,14 +77,16 @@ export async function GET() {
+     }
+ 
+     return NextResponse.json({ exito: true, datos: ROLES_PREDETERMINADOS });
+-  } catch (error: any) {
+-    return NextResponse.json({ exito: true, datos: ROLES_PREDETERMINADOS });
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+ 
+ export async function POST(peticion: NextRequest) {
+   try {
++    await autorizar_administracion("roles:crear");
+     const cuerpo = await peticion.json();
++    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) throw new ErrorAdministrativo(400, "Cuerpo inválido");
+     const { nombre, descripcion, acceso_dashboard, permisos } = cuerpo;
+ 
+     if (!nombre || !descripcion) {
+@@ -91,7 +96,11 @@ export async function POST(peticion: NextRequest) {
+       );
+     }
+ 
+-    const nombre_limpio = nombre.trim().toLowerCase();
++    const nombre_limpio = texto_opcional(nombre, "nombre")!.toLowerCase();
++    texto_opcional(descripcion, "descripcion");
++    if (ROLES_CONOCIDOS.includes(nombre_limpio)) throw new ErrorAdministrativo(400, "Nombre de rol reservado por el sistema");
++    if (acceso_dashboard !== undefined && typeof acceso_dashboard !== "boolean") throw new ErrorAdministrativo(400, "acceso_dashboard debe ser booleano");
++    if (permisos !== undefined && (!Array.isArray(permisos) || !permisos.every(p => typeof p === "string"))) throw new ErrorAdministrativo(400, "Permisos inválidos");
+ 
+     try {
+       await conectar_base_datos();
+@@ -117,26 +126,10 @@ export async function POST(peticion: NextRequest) {
+         mensaje: "Nuevo rol creado exitosamente",
+         datos: nuevo_rol,
+       });
+-    } catch (e_db: any) {
+-      // Fallback si la BD aún no responde
+-      const rol_creado = {
+-        _id: `rol_${Date.now()}`,
+-        nombre: nombre_limpio,
+-        descripcion: descripcion.trim(),
+-        acceso_dashboard: Boolean(acceso_dashboard),
+-        es_sistema: false,
+-        permisos: permisos || [],
+-      };
+-      return NextResponse.json({
+-        exito: true,
+-        mensaje: "Nuevo rol registrado",
+-        datos: rol_creado,
+-      });
++    } catch (e_db: unknown) {
++      throw new ErrorAdministrativo(503, "No se pudo guardar el rol");
+     }
+-  } catch (error: any) {
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al crear el rol", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+diff --git a/src/app/api/usuarios/preasignar/route.ts b/src/app/api/usuarios/preasignar/route.ts
+index 8b6ae54..e145e2b 100644
+--- a/src/app/api/usuarios/preasignar/route.ts
++++ b/src/app/api/usuarios/preasignar/route.ts
+@@ -1,136 +1,52 @@
+ import { NextResponse, NextRequest } from "next/server";
+-import { createClerkClient } from "@clerk/backend";
+-import { conectar_base_datos } from "@/lib/base_datos";
+ import { ModeloPreasignacionUsuario } from "@/modelos/PreasignacionUsuario";
+-import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
+-
+-const cliente_clerk = createClerkClient({
+-  secretKey: process.env.CLERK_SECRET_KEY,
+-  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+-});
++import { guardar_almacen_local } from "@/lib/almacen_local";
++import { autorizar_administracion, respuesta_error_administrativo, texto_opcional,
++  correo_validado, validar_rol_asignable, ErrorAdministrativo } from "@/lib/autorizacion";
++import { con_objetivo_bloqueado, actualizar_objetivo } from "@/lib/usuarios_administrativos";
+ 
+ export async function POST(peticion: NextRequest) {
+   try {
++    const actor = await autorizar_administracion("preasignaciones:gestionar");
+     const cuerpo = await peticion.json();
+-    const { correo_electronico, nombre_completo, rol_asignado } = cuerpo;
+-
+-    if (!correo_electronico || !nombre_completo || !rol_asignado) {
+-      return NextResponse.json(
+-        { exito: false, mensaje: "Correo, nombre completo y rol son obligatorios" },
+-        { status: 400 }
+-      );
+-    }
+-
+-    const correo_limpio = correo_electronico.trim().toLowerCase();
+-    const rol_limpio = rol_asignado.trim().toLowerCase();
+-    const nombre_limpio = nombre_completo.trim();
+-
+-    // 1. Guardar en almacén local
+-    const almacen = leer_almacen_local();
+-    const existente_idx = (almacen.preasignaciones || []).findIndex(
+-      (p: any) => p.correo_electronico.toLowerCase() === correo_limpio
+-    );
+-
+-    const objeto_preasignacion = {
+-      _id: `pre_${Date.now()}`,
+-      correo_electronico: correo_limpio,
+-      nombre_completo: nombre_limpio,
+-      rol_asignado: rol_limpio,
+-      completado: false,
+-      fecha_creacion: new Date().toISOString(),
+-    };
+-
+-    if (existente_idx >= 0) {
+-      almacen.preasignaciones[existente_idx] = objeto_preasignacion;
+-    } else {
+-      almacen.preasignaciones = [objeto_preasignacion, ...(almacen.preasignaciones || [])];
+-    }
+-    guardar_almacen_local(almacen);
+-
+-    // 2. Intentar guardar en MongoDB Atlas
+-    try {
+-      await conectar_base_datos();
+-      await ModeloPreasignacionUsuario.findOneAndUpdate(
+-        { correo_electronico: correo_limpio },
+-        {
+-          nombre_completo: nombre_limpio,
+-          rol_asignado: rol_limpio,
+-          completado: false,
+-        },
+-        { upsert: true, new: true }
+-      );
+-    } catch (e_db: any) {
+-      console.warn("MongoDB no conectado, preasignación guardada en respaldo local:", e_db.message);
+-    }
+-
+-    // 3. Verificar si el usuario ya existe en Clerk por si acaso ya se había registrado
+-    try {
+-      const lista = await cliente_clerk.users.getUserList({
+-        emailAddress: [correo_limpio],
+-      });
+-      if (lista.data.length > 0) {
+-        const u = lista.data[0];
+-        const tiene_acceso = ["superadmin", "admin", "secretario", "moderador"].includes(rol_limpio);
+-        await cliente_clerk.users.updateUser(u.id, {
+-          publicMetadata: {
+-            rol: rol_limpio,
+-            acceso_dashboard: tiene_acceso,
+-          },
+-        });
+-      }
+-    } catch (e_clerk: any) {
+-      console.warn("Aviso al verificar Clerk en preasignación:", e_clerk.message);
+-    }
+-
+-    return NextResponse.json({
+-      exito: true,
+-      mensaje: `Rol '${rol_limpio}' pre-asignado a ${correo_limpio}. Cuando inicie sesión, entrará directamente con este rol.`,
+-      datos: objeto_preasignacion,
++    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) throw new ErrorAdministrativo(400, "Cuerpo inválido");
++    const correo = correo_validado(cuerpo.correo_electronico);
++    const nombre = texto_opcional(cuerpo.nombre_completo, "nombre_completo");
++    if (!correo || !nombre) throw new ErrorAdministrativo(400, "Correo y nombre completo son obligatorios");
++    const rol = validar_rol_asignable(actor, cuerpo.rol_asignado);
++    return await con_objetivo_bloqueado(actor, undefined, correo, { rol, crear_preasignacion: true }, async objetivo => {
++      // Preasignar no es una vía alternativa para degradar cuentas protegidas.
++      if (objetivo.usuario) await actualizar_objetivo(objetivo, { rol, nombre_completo: nombre });
++      const objeto = { _id: `pre_${Date.now()}`, correo_electronico: objetivo.correo,
++        nombre_completo: nombre, rol_asignado: rol, completado: Boolean(objetivo.usuario),
++        fecha_creacion: new Date().toISOString() };
++      const datos = await ModeloPreasignacionUsuario.findOneAndUpdate(
++        { correo_electronico: objetivo.correo }, { $set: { nombre_completo: nombre, rol_asignado: rol,
++          completado: objeto.completado } }, { upsert: true, new: true, runValidators: true });
++      objetivo.almacen.preasignaciones = [objeto, ...objetivo.almacen.preasignaciones.filter(
++        (p: { correo_electronico: string }) => p.correo_electronico.toLowerCase() !== objetivo.correo)];
++      guardar_almacen_local(objetivo.almacen);
++      return NextResponse.json({ exito: true,
++        mensaje: `Rol '${rol}' pre-asignado a ${objetivo.correo}.`, datos: datos || objeto });
+     });
+-  } catch (error: any) {
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al preasignar rol", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+ 
+ export async function DELETE(peticion: NextRequest) {
+   try {
+-    const { searchParams } = new URL(peticion.url);
+-    const correo = searchParams.get("correo");
+-
+-    if (!correo) {
+-      return NextResponse.json(
+-        { exito: false, mensaje: "Se requiere el parámetro correo" },
+-        { status: 400 }
+-      );
+-    }
+-
+-    const correo_limpio = correo.trim().toLowerCase();
+-
+-    // Eliminar del respaldo local
+-    const almacen = leer_almacen_local();
+-    almacen.preasignaciones = (almacen.preasignaciones || []).filter(
+-      (p: any) => p.correo_electronico.toLowerCase() !== correo_limpio
+-    );
+-    guardar_almacen_local(almacen);
+-
+-    // Eliminar de MongoDB
+-    try {
+-      await conectar_base_datos();
+-      await ModeloPreasignacionUsuario.deleteOne({ correo_electronico: correo_limpio });
+-    } catch (e_db) {}
+-
+-    return NextResponse.json({
+-      exito: true,
+-      mensaje: "Preasignación eliminada correctamente",
++    const actor = await autorizar_administracion("preasignaciones:gestionar");
++    const correo = correo_validado(new URL(peticion.url).searchParams.get("correo"));
++    if (!correo) throw new ErrorAdministrativo(400, "Se requiere el parámetro correo");
++    return await con_objetivo_bloqueado(actor, undefined, correo, { cancelar_preasignacion: true }, async objetivo => {
++      await ModeloPreasignacionUsuario.deleteOne({ correo_electronico: objetivo.correo });
++      objetivo.almacen.preasignaciones = objetivo.almacen.preasignaciones.filter(
++        (p: { correo_electronico: string }) => p.correo_electronico.toLowerCase() !== objetivo.correo);
++      guardar_almacen_local(objetivo.almacen);
++      return NextResponse.json({ exito: true, mensaje: "Preasignación eliminada correctamente" });
+     });
+-  } catch (error: any) {
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al eliminar preasignación", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+-
+diff --git a/src/app/api/usuarios/route.ts b/src/app/api/usuarios/route.ts
+index 7ab488d..21de4ca 100644
+--- a/src/app/api/usuarios/route.ts
++++ b/src/app/api/usuarios/route.ts
+@@ -1,17 +1,18 @@
+ import { NextResponse, NextRequest } from "next/server";
+-import { createClerkClient } from "@clerk/backend";
++import {
++  autorizar_administracion, cliente_clerk_administrativo, respuesta_error_administrativo,
++  texto_opcional, correo_validado, validar_rol_asignable, ErrorAdministrativo, rol_efectivo, es_identidad_fundador,
++} from "@/lib/autorizacion";
++import { con_objetivo_bloqueado, actualizar_objetivo } from "@/lib/usuarios_administrativos";
+ import { conectar_base_datos } from "@/lib/base_datos";
+ import { ModeloUsuario } from "@/modelos/Usuario";
+ import { ModeloPreasignacionUsuario } from "@/modelos/PreasignacionUsuario";
+ import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
+ 
+-const cliente_clerk = createClerkClient({
+-  secretKey: process.env.CLERK_SECRET_KEY,
+-  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+-});
+-
+ export async function GET() {
+   try {
++    await autorizar_administracion("usuarios:ver");
++    const cliente_clerk = cliente_clerk_administrativo();
+     // 1. Obtener la lista real y actualizada de todos los usuarios registrados en Clerk
+     let usuarios_clerk: any[] = [];
+     try {
+@@ -39,12 +40,8 @@ export async function GET() {
+       const correo = u.emailAddresses[0]?.emailAddress?.toLowerCase() || "sin_correo";
+       correos_registrados.add(correo);
+ 
+-      const es_fundador =
+-        correo === "22610282@utgz.edu.mx" ||
+-        u.id === "user_3JzRT8FQJPrqKEfk2QdjZpFaRVN";
+-
+-      const metadatos = (u.publicMetadata as Record<string, any>) || {};
+-      const rol_clerk = es_fundador ? "superadmin" : metadatos.rol || "ciudadano";
++      const rol_clerk = rol_efectivo(u);
++      const es_fundador = es_identidad_fundador(u.id, correo);
+ 
+       const nombre =
+         [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+@@ -92,199 +89,50 @@ export async function GET() {
+       exito: true,
+       datos: lista_final,
+     });
+-  } catch (error: any) {
+-    console.error("Error al obtener usuarios:", error);
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al obtener usuarios", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+ 
+ export async function PUT(peticion: NextRequest) {
+   try {
++    const actor = await autorizar_administracion("usuarios:gestionar");
+     const cuerpo = await peticion.json();
+-    const { id_usuario, correo_electronico, nuevo_rol, nombre_completo, activo } = cuerpo;
+-
+-    if (!id_usuario && !correo_electronico) {
+-      return NextResponse.json(
+-        { exito: false, mensaje: "Se requiere identificación (id_usuario o correo_electronico)" },
+-        { status: 400 }
+-      );
+-    }
+-
+-    const rol_limpio = nuevo_rol ? nuevo_rol.toLowerCase() : undefined;
+-    const tiene_acceso = rol_limpio
+-      ? ["superadmin", "admin", "secretario", "moderador"].includes(rol_limpio)
+-      : undefined;
+-
+-    // 1. Si es ID de Clerk
+-    if (id_usuario && id_usuario.startsWith("user_")) {
+-      try {
+-        const payload_clerk: any = {};
+-        if (nombre_completo) {
+-          const partes = nombre_completo.trim().split(" ");
+-          payload_clerk.firstName = partes[0] || "";
+-          payload_clerk.lastName = partes.slice(1).join(" ") || "";
+-        }
+-        if (rol_limpio) {
+-          payload_clerk.publicMetadata = {
+-            rol: rol_limpio,
+-            acceso_dashboard: tiene_acceso,
+-          };
+-        }
+-        await cliente_clerk.users.updateUser(id_usuario, payload_clerk);
+-      } catch (err_clerk: any) {
+-        console.warn("Aviso al actualizar en Clerk por ID:", err_clerk.message);
+-      }
+-    } else if (correo_electronico) {
+-      // Si no tenemos ID de Clerk directo pero sí correo, buscar en Clerk y actualizar si existe
+-      try {
+-        const busqueda_clerk = await cliente_clerk.users.getUserList({
+-          emailAddress: [correo_electronico.toLowerCase()],
+-        });
+-        if (busqueda_clerk.data.length > 0) {
+-          const u_clerk = busqueda_clerk.data[0];
+-          const payload_clerk: any = {};
+-          if (nombre_completo) {
+-            const partes = nombre_completo.trim().split(" ");
+-            payload_clerk.firstName = partes[0] || "";
+-            payload_clerk.lastName = partes.slice(1).join(" ") || "";
+-          }
+-          if (rol_limpio) {
+-            payload_clerk.publicMetadata = {
+-              rol: rol_limpio,
+-              acceso_dashboard: tiene_acceso,
+-            };
+-          }
+-          await cliente_clerk.users.updateUser(u_clerk.id, payload_clerk);
+-        }
+-      } catch (err_busqueda: any) {
+-        console.warn("Aviso al buscar y actualizar Clerk por correo:", err_busqueda.message);
+-      }
+-    }
+-
+-    // 2. Si es una preasignación por correo o usuario en MongoDB, actualizar ambos
+-    const correo_fmt = correo_electronico ? correo_electronico.toLowerCase() : null;
+-
+-    if (correo_fmt) {
+-      const almacen = leer_almacen_local();
+-      const p = (almacen.preasignaciones || []).find(
+-        (item: any) => item.correo_electronico.toLowerCase() === correo_fmt
+-      );
+-      if (p) {
+-        if (rol_limpio) p.rol_asignado = rol_limpio;
+-        if (nombre_completo) p.nombre_completo = nombre_completo;
+-        guardar_almacen_local(almacen);
+-      }
+-
+-      try {
+-        await conectar_base_datos();
+-        const obj_update_pre: any = {};
+-        if (rol_limpio) obj_update_pre.rol_asignado = rol_limpio;
+-        if (nombre_completo) obj_update_pre.nombre_completo = nombre_completo;
+-        await ModeloPreasignacionUsuario.findOneAndUpdate(
+-          { correo_electronico: correo_fmt },
+-          obj_update_pre
+-        );
+-      } catch (e_db_up) {}
+-    }
+-
+-    // 3. Actualizar colección de MongoDB de usuarios si existe
+-    try {
+-      await conectar_base_datos();
+-      const filtro: any = {};
+-      if (id_usuario) filtro.$or = [{ id_clerk: id_usuario }];
+-      if (correo_fmt) {
+-        filtro.$or = [...(filtro.$or || []), { correo_electronico: correo_fmt }];
+-      }
+-
+-      const obj_update: any = { fecha_actualizacion: new Date() };
+-      if (rol_limpio) obj_update.rol = rol_limpio;
+-      if (nombre_completo) obj_update.nombre_completo = nombre_completo;
+-      if (typeof activo === "boolean") obj_update.activo = activo;
+-
+-      await ModeloUsuario.findOneAndUpdate(filtro, { $set: obj_update });
+-    } catch (e_usr_db) {}
+-
+-    return NextResponse.json({
+-      exito: true,
+-      mensaje: `Usuario actualizado correctamente`,
+-      datos: { id: id_usuario, rol: rol_limpio, nombre_completo },
++    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) throw new ErrorAdministrativo(400, "Cuerpo inválido");
++    const id = texto_opcional(cuerpo.id_usuario, "id_usuario");
++    const correo = correo_validado(cuerpo.correo_electronico);
++    const rol = cuerpo.nuevo_rol !== undefined ? validar_rol_asignable(actor, cuerpo.nuevo_rol) : undefined;
++    const nombre_completo = texto_opcional(cuerpo.nombre_completo, "nombre_completo");
++    if (cuerpo.activo !== undefined && typeof cuerpo.activo !== "boolean") throw new ErrorAdministrativo(400, "activo debe ser booleano");
++    if (rol === undefined && nombre_completo === undefined && cuerpo.activo === undefined) throw new ErrorAdministrativo(400, "No hay cambios válidos");
++    return await con_objetivo_bloqueado(actor, id, correo, { rol, activo: cuerpo.activo }, async objetivo => {
++      await actualizar_objetivo(objetivo, { rol, nombre_completo, activo: cuerpo.activo });
++      return NextResponse.json({ exito: true, mensaje: "Usuario actualizado correctamente",
++        datos: { id: objetivo.usuario?.id, rol, nombre_completo } });
+     });
+-  } catch (error: any) {
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al actualizar usuario", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+ 
+ export async function DELETE(peticion: NextRequest) {
+   try {
++    const actor = await autorizar_administracion("usuarios:eliminar");
+     const { searchParams } = new URL(peticion.url);
+-    const id_usuario = searchParams.get("id");
+-    const correo = searchParams.get("correo")?.toLowerCase();
+-
+-    if (!id_usuario && !correo) {
+-      return NextResponse.json(
+-        { exito: false, mensaje: "Se requiere parámetro 'id' o 'correo'" },
+-        { status: 400 }
+-      );
+-    }
+-
+-    // 1. Si es ID de Clerk, eliminar de Clerk
+-    if (id_usuario && id_usuario.startsWith("user_")) {
+-      try {
+-        await cliente_clerk.users.deleteUser(id_usuario);
+-      } catch (err_clerk: any) {
+-        console.warn("Aviso al eliminar de Clerk por ID:", err_clerk.message);
+-      }
+-    } else if (correo) {
+-      // Si solo viene correo, intentar buscarlo en Clerk y eliminarlo
+-      try {
+-        const busqueda_clerk = await cliente_clerk.users.getUserList({
+-          emailAddress: [correo],
+-        });
+-        if (busqueda_clerk.data.length > 0) {
+-          await cliente_clerk.users.deleteUser(busqueda_clerk.data[0].id);
+-        }
+-      } catch (err_clerk_c: any) {
+-        console.warn("Aviso al eliminar de Clerk por correo:", err_clerk_c.message);
+-      }
+-    }
+-
+-    // 2. Eliminar de almacén local (preasignaciones y usuarios locales)
+-    const almacen = leer_almacen_local();
+-    if (almacen.preasignaciones) {
+-      almacen.preasignaciones = almacen.preasignaciones.filter((p: any) => {
+-        if (id_usuario && p._id === id_usuario) return false;
+-        if (correo && p.correo_electronico.toLowerCase() === correo) return false;
+-        return true;
+-      });
+-      guardar_almacen_local(almacen);
+-    }
+-
+-    // 3. Eliminar de MongoDB (Preasignacion y Usuario)
+-    try {
+-      await conectar_base_datos();
+-      if (correo) {
+-        await ModeloPreasignacionUsuario.deleteOne({ correo_electronico: correo });
+-        await ModeloUsuario.deleteOne({ correo_electronico: correo });
+-      }
+-      if (id_usuario) {
+-        await ModeloUsuario.deleteOne({ id_clerk: id_usuario });
+-      }
+-    } catch (e_db) {}
+-
+-    return NextResponse.json({
+-      exito: true,
+-      mensaje: "Usuario eliminado correctamente del sistema",
++    const id = texto_opcional(searchParams.get("id"), "id");
++    const correo = correo_validado(searchParams.get("correo"));
++    return await con_objetivo_bloqueado(actor, id, correo, { eliminar: true }, async objetivo => {
++      if (!objetivo.existe) throw new ErrorAdministrativo(404, "Usuario o preasignación no encontrado");
++      // Usar únicamente la identidad resuelta, nunca dos selectores independientes.
++      if (objetivo.usuario) await cliente_clerk_administrativo().users.deleteUser(objetivo.usuario.id);
++      await ModeloPreasignacionUsuario.deleteOne({ correo_electronico: objetivo.correo });
++      if (objetivo.usuario) await ModeloUsuario.deleteOne({ id_clerk: objetivo.usuario.id, correo_electronico: objetivo.correo });
++      objetivo.almacen.preasignaciones = objetivo.almacen.preasignaciones.filter(
++        (p: { correo_electronico: string }) => p.correo_electronico.toLowerCase() !== objetivo.correo);
++      guardar_almacen_local(objetivo.almacen);
++      return NextResponse.json({ exito: true, mensaje: "Usuario eliminado correctamente del sistema" });
+     });
+-  } catch (error: any) {
+-    return NextResponse.json(
+-      { exito: false, mensaje: "Error al eliminar usuario", detalle: error.message },
+-      { status: 500 }
+-    );
++  } catch (error: unknown) {
++    return respuesta_error_administrativo(error);
+   }
+ }
+diff --git a/src/middleware.ts b/src/middleware.ts
+index 4a3f8c9..b50535a 100644
+--- a/src/middleware.ts
++++ b/src/middleware.ts
+@@ -1,6 +1,7 @@
+ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+ import { createClerkClient } from "@clerk/backend";
+ import { NextResponse } from "next/server";
++import { autorizar_administracion, permiso_api_administrativa, respuesta_error_administrativo } from "@/lib/autorizacion";
+ 
+ const es_ruta_dashboard = createRouteMatcher(["/dashboard(.*)"]);
+ const es_ruta_publica = createRouteMatcher([
+@@ -23,6 +24,16 @@ const IDS_SUPERADMIN = [
+ export default clerkMiddleware(async (auth, peticion) => {
+   const { userId, sessionClaims } = await auth();
+ 
++  const permiso = permiso_api_administrativa(new URL(peticion.url).pathname, peticion.method);
++  if (permiso) {
++    try {
++      await autorizar_administracion(permiso, userId);
++      return NextResponse.next();
++    } catch (error) {
++      return respuesta_error_administrativo(error);
++    }
++  }
++
+   // Si intenta acceder al dashboard
+   if (es_ruta_dashboard(peticion)) {
+     // Si no está autenticado, redirigir al login
+diff --git a/src/lib/autorizacion.ts b/src/lib/autorizacion.ts
+new file mode 100644
+index 0000000..ab63ea0
+--- /dev/null
++++ b/src/lib/autorizacion.ts
+@@ -0,0 +1,141 @@
++import { auth } from "@clerk/nextjs/server";
++import { createClerkClient } from "@clerk/backend";
++import { NextResponse } from "next/server";
++
++export const ROLES_INFERIORES = ["secretario", "moderador", "ciudadano", "conductor", "camion"] as const;
++export const ROLES_CONOCIDOS: readonly string[] = ["superadmin", "admin", ...ROLES_INFERIORES];
++export type PermisoAdministrativo = "usuarios:ver" | "usuarios:gestionar" | "usuarios:eliminar" |
++  "roles:ver" | "roles:crear" | "preasignaciones:gestionar";
++const PERMISOS: Record<string, readonly PermisoAdministrativo[]> = {
++  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar"],
++  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar"],
++};
++
++export type UsuarioSeguridad = {
++  id: string;
++  publicMetadata: Record<string, unknown>;
++  primaryEmailAddressId: string | null;
++  emailAddresses: { id: string; emailAddress: string; verification?: { status: string } | null }[];
++  banned?: boolean;
++  locked?: boolean;
++};
++export type ActorAdministrativo = { usuario: UsuarioSeguridad; rol: string };
++
++export class ErrorAdministrativo extends Error {
++  constructor(public status: number, mensaje: string) { super(mensaje); }
++}
++
++export function cliente_clerk_administrativo() {
++  return createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
++}
++
++// Identificadores ya existentes en middleware y sincronizar; no se crean cuentas.
++const ID_FUNDADOR = "user_3JzRT8FQJPrqKEfk2QdjZpFaRVN";
++const CORREO_FUNDADOR = "22610282@utgz.edu.mx";
++export function es_identidad_fundador(id?: string, correo?: string): boolean {
++  return Boolean((id && [ID_FUNDADOR, process.env.SUPERADMIN_USER_ID].includes(id)) ||
++    (correo && [CORREO_FUNDADOR, process.env.ADMIN_CORREO?.trim().toLowerCase()].includes(correo.toLowerCase())));
++}
++
++export function rol_efectivo(usuario: UsuarioSeguridad): string {
++  if (es_identidad_fundador(usuario.id) || usuario.emailAddresses.some(e =>
++    e.verification?.status === "verified" && es_identidad_fundador(undefined, e.emailAddress))) return "superadmin";
++  // Nunca inferir permisos de acceso_dashboard ni de metadatos enviados por cliente.
++  return typeof usuario.publicMetadata.rol === "string" ? usuario.publicMetadata.rol.trim().toLowerCase() : "ciudadano";
++}
++
++export async function autorizar_administracion(permiso: PermisoAdministrativo, id_sesion?: string | null): Promise<ActorAdministrativo> {
++  try {
++    const id = id_sesion === undefined ? (await auth()).userId : id_sesion;
++    if (!id) throw new ErrorAdministrativo(401, "No hay sesión activa de usuario");
++    const usuario = await cliente_clerk_administrativo().users.getUser(id);
++    const rol = rol_efectivo(usuario);
++    if (usuario.banned || usuario.locked || !Object.hasOwn(PERMISOS, rol) || !PERMISOS[rol].includes(permiso)) {
++      throw new ErrorAdministrativo(403, "No tienes permisos para esta operación");
++    }
++    return { usuario, rol };
++  } catch (error) {
++    if (error instanceof ErrorAdministrativo) throw error;
++    throw new ErrorAdministrativo(503, "No se pudo verificar la autorización con Clerk");
++  }
++}
++
++export function permiso_api_administrativa(ruta: string, metodo: string): PermisoAdministrativo | null {
++  const normalizada = ruta.replace(/\/+$/, "");
++  if (normalizada === "/api/usuarios/preasignar") return "preasignaciones:gestionar";
++  if (normalizada === "/api/usuarios") return metodo === "GET" ? "usuarios:ver" : metodo === "DELETE" ? "usuarios:eliminar" : "usuarios:gestionar";
++  if (normalizada === "/api/roles") return metodo === "GET" ? "roles:ver" : "roles:crear";
++  return null;
++}
++
++export function texto_opcional(valor: unknown, campo: string): string | undefined {
++  if (valor === undefined || valor === null) return undefined;
++  if (typeof valor !== "string" || !valor.trim()) throw new ErrorAdministrativo(400, `Campo inválido: ${campo}`);
++  return valor.trim();
++}
++
++export function correo_validado(valor: unknown): string | undefined {
++  const correo = texto_opcional(valor, "correo_electronico")?.toLowerCase();
++  if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) throw new ErrorAdministrativo(400, "Correo electrónico inválido");
++  return correo;
++}
++
++export function validar_rol_asignable(actor: ActorAdministrativo, valor: unknown): string {
++  const rol = texto_opcional(valor, "rol")?.toLowerCase();
++  if (!rol || !ROLES_CONOCIDOS.includes(rol) ||
++    (actor.rol === "admin" && !(ROLES_INFERIORES as readonly string[]).includes(rol))) {
++    throw new ErrorAdministrativo(403, "No puedes asignar ese rol");
++  }
++  return rol;
++}
++
++export async function resolver_usuario_clerk(id?: string, correo?: string): Promise<UsuarioSeguridad | null> {
++  try {
++    const cliente = cliente_clerk_administrativo();
++    if (id) {
++      if (!/^user_[a-zA-Z0-9_]+$/.test(id)) throw new ErrorAdministrativo(400, "Se requiere un ID de usuario de Clerk válido");
++      const usuario = await cliente.users.getUser(id);
++      if (correo && !usuario.emailAddresses.some(e => e.emailAddress.toLowerCase() === correo)) {
++        throw new ErrorAdministrativo(400, "El ID y el correo no corresponden a la misma cuenta");
++      }
++      return usuario;
++    }
++    if (!correo) throw new ErrorAdministrativo(400, "Se requiere identificación del usuario");
++    const resultado = await cliente.users.getUserList({ emailAddress: [correo], limit: 2 });
++    if (resultado.totalCount > 1) throw new ErrorAdministrativo(409, "Identidad ambigua");
++    const usuario = resultado.data[0];
++    if (usuario && !usuario.emailAddresses.some(e => e.emailAddress.toLowerCase() === correo)) {
++      throw new ErrorAdministrativo(409, "Clerk devolvió una identidad inconsistente");
++    }
++    return usuario || null;
++  } catch (error) {
++    if (error instanceof ErrorAdministrativo) throw error;
++    if ((error as { status?: number }).status === 404) throw new ErrorAdministrativo(404, "Usuario no encontrado");
++    throw new ErrorAdministrativo(503, "No se pudo verificar la identidad con Clerk");
++  }
++}
++
++export function validar_gestion_objetivo(actor: ActorAdministrativo, objetivo: {
++  id?: string; correo?: string; roles: string[]; fundador?: boolean;
++}, cambio: { eliminar?: boolean; cancelar_preasignacion?: boolean; rol?: string; activo?: boolean }) {
++  if (objetivo.roles.some(rol => !ROLES_CONOCIDOS.includes(rol))) throw new ErrorAdministrativo(403, "El rol objetivo no tiene una jerarquía definida");
++  if (actor.rol === "admin" && (cambio.eliminar || objetivo.fundador || es_identidad_fundador(objetivo.id, objetivo.correo) ||
++    objetivo.roles.some(rol => !(ROLES_INFERIORES as readonly string[]).includes(rol)))) {
++    throw new ErrorAdministrativo(403, "No puedes administrar esta cuenta");
++  }
++  const protegido = objetivo.fundador || es_identidad_fundador(objetivo.id, objetivo.correo) || objetivo.roles.includes("superadmin");
++  // No hay CAS entre Clerk y MongoDB: bloquear todos los superadmins evita
++  // depender de un conteo vulnerable a borrados/degradaciones concurrentes.
++  if (protegido && (cambio.eliminar || cambio.cancelar_preasignacion || cambio.activo === false || (cambio.rol !== undefined && cambio.rol !== "superadmin"))) {
++    throw new ErrorAdministrativo(403, "No se permite eliminar, degradar o desactivar al fundador ni a cuentas superadmin");
++  }
++  if (objetivo.id === actor.usuario.id && cambio.rol && cambio.rol !== actor.rol) {
++    throw new ErrorAdministrativo(403, "No puedes cambiar tus propios privilegios");
++  }
++}
++
++export function respuesta_error_administrativo(error: unknown) {
++  const status = error instanceof ErrorAdministrativo ? error.status : error instanceof SyntaxError ? 400 : 503;
++  const mensaje = error instanceof ErrorAdministrativo ? error.message : status === 400 ? "JSON inválido" : "No se pudo completar la operación administrativa";
++  return NextResponse.json({ exito: false, mensaje }, { status });
++}
+diff --git a/src/lib/usuarios_administrativos.ts b/src/lib/usuarios_administrativos.ts
+new file mode 100644
+index 0000000..e09eaa4
+--- /dev/null
++++ b/src/lib/usuarios_administrativos.ts
+@@ -0,0 +1,115 @@
++import { conectar_base_datos } from "@/lib/base_datos";
++import { ModeloUsuario } from "@/modelos/Usuario";
++import { ModeloPreasignacionUsuario } from "@/modelos/PreasignacionUsuario";
++import { ModeloBloqueoAdministrativo } from "@/modelos/BloqueoAdministrativo";
++import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
++import { ActorAdministrativo, UsuarioSeguridad, ErrorAdministrativo, resolver_usuario_clerk,
++  rol_efectivo, es_identidad_fundador, validar_gestion_objetivo, cliente_clerk_administrativo,
++  autorizar_administracion, validar_rol_asignable } from "./autorizacion";
++
++type CambioSeguridad = { eliminar?: boolean; cancelar_preasignacion?: boolean; crear_preasignacion?: boolean; rol?: string; activo?: boolean };
++
++export async function con_objetivo_bloqueado<T>(actor: ActorAdministrativo, id: string | undefined,
++  correo: string | undefined, cambio: CambioSeguridad,
++  operar: (objetivo: Awaited<ReturnType<typeof preparar_objetivo>>) => Promise<T>): Promise<T> {
++  // Resolver alias antes de bloquear; por ID y correo se utiliza la misma clave.
++  const identidad = await resolver_usuario_clerk(id, correo);
++  const clave = identidad?.id || `correo:${correo}`;
++  await conectar_base_datos();
++  let operacion_iniciada = false;
++  let operacion_completada = false;
++  try {
++    await ModeloBloqueoAdministrativo.create({ _id: clave });
++  } catch (error) {
++    if ((error as { code?: number }).code === 11000) throw new ErrorAdministrativo(409, "La cuenta tiene una operación administrativa en curso o pendiente de recuperación");
++    throw new ErrorAdministrativo(503, "No se pudo garantizar exclusión para esta cuenta");
++  }
++  try {
++    // Releer autorización y objetivo DENTRO del bloqueo, nunca usar el snapshot
++    // anterior. Todas las mutaciones administrativas de cuentas pasan por aquí.
++    const actor_actual = await autorizar_administracion(cambio.eliminar ? "usuarios:eliminar" : "usuarios:gestionar", actor.usuario.id);
++    if (cambio.rol) {
++      // El actor podría haber sido degradado entre la autorización inicial y el bloqueo.
++      validar_rol_asignable(actor_actual, cambio.rol);
++    }
++    const objetivo = await preparar_objetivo(actor_actual, id, correo, cambio);
++    if ((objetivo.usuario?.id || `correo:${objetivo.correo}`) !== clave) {
++      throw new ErrorAdministrativo(409, "La identidad cambió durante la operación; vuelve a intentarlo");
++    }
++    if (!objetivo.existe && !cambio.crear_preasignacion && !cambio.cancelar_preasignacion) {
++      throw new ErrorAdministrativo(404, "Usuario o preasignación no encontrado");
++    }
++    operacion_iniciada = true;
++    const resultado = await operar(objetivo);
++    operacion_completada = true;
++    return resultado;
++  } finally {
++    // Si liberar falla, el bloqueo permanece y las siguientes escrituras fallan
++    // cerradas. No se retira automáticamente un bloqueo abandonado.
++    // Una excepción tras iniciar escrituras puede ser un resultado remoto
++    // incierto. Mantener el bloqueo evita reintentos que se solapen con él.
++    if (!operacion_iniciada || operacion_completada) {
++      await ModeloBloqueoAdministrativo.deleteOne({ _id: clave });
++    }
++  }
++}
++
++export async function preparar_objetivo(actor: ActorAdministrativo, id: string | undefined, correo_solicitado: string | undefined,
++  cambio: CambioSeguridad) {
++  const usuario = await resolver_usuario_clerk(id, correo_solicitado);
++  const correo = correo_solicitado || usuario?.emailAddresses.find(e => e.id === usuario.primaryEmailAddressId)?.emailAddress.toLowerCase()
++    || usuario?.emailAddresses[0]?.emailAddress.toLowerCase();
++  if (!correo) throw new ErrorAdministrativo(400, "No se pudo determinar el correo de la cuenta");
++  // Se revisan TODAS las fuentes antes de escribir: una caída de BD no permite
++  // omitir un rol privilegiado o una identidad conflictiva de una preasignación.
++  await conectar_base_datos();
++  const pre_db = await ModeloPreasignacionUsuario.findOne({ correo_electronico: correo });
++  const usuario_db = await ModeloUsuario.findOne({ correo_electronico: correo });
++  const usuario_db_id = usuario ? await ModeloUsuario.findOne({ id_clerk: usuario.id }) : null;
++  if ((usuario_db && usuario_db.id_clerk !== usuario?.id) ||
++      (usuario_db_id && usuario_db_id.correo_electronico.toLowerCase() !== correo)) {
++    throw new ErrorAdministrativo(409, "La identidad de MongoDB no coincide con Clerk");
++  }
++  const almacen = leer_almacen_local();
++  const pre_local = (almacen.preasignaciones || []).filter((p: { correo_electronico: string }) => p.correo_electronico.toLowerCase() === correo);
++  const roles = [usuario ? rol_efectivo(usuario) : undefined, usuario_db?.rol,
++    pre_db?.rol_asignado, ...pre_local.map((p: { rol_asignado: string }) => p.rol_asignado)]
++    .filter((r): r is string => r !== undefined).map(r => typeof r === "string" ? r.trim().toLowerCase() : "");
++  const fundador = usuario ? es_fundador_protegido(usuario) : es_identidad_fundador(undefined, correo);
++  validar_gestion_objetivo(actor, { id: usuario?.id, correo, roles, fundador }, cambio);
++  return { usuario, correo, almacen, existe: Boolean(usuario || pre_db || pre_local.length), pre_db };
++}
++
++function es_fundador_protegido(usuario: UsuarioSeguridad) {
++  return es_identidad_fundador(usuario.id) || usuario.emailAddresses.some(e => es_identidad_fundador(undefined, e.emailAddress));
++}
++
++export async function actualizar_objetivo(objetivo: Awaited<ReturnType<typeof preparar_objetivo>>, cambio: {
++  rol?: string; nombre_completo?: string; activo?: boolean;
++}) {
++  const { usuario, correo, almacen } = objetivo;
++  if (!objetivo.existe) throw new ErrorAdministrativo(404, "Usuario o preasignación no encontrado");
++  if (usuario) {
++    const partes = cambio.nombre_completo?.split(/\s+/);
++    await cliente_clerk_administrativo().users.updateUser(usuario.id, {
++      ...(partes ? { firstName: partes[0], lastName: partes.slice(1).join(" ") } : {}),
++      ...(cambio.rol ? { publicMetadata: { ...usuario.publicMetadata, rol: cambio.rol,
++        acceso_dashboard: ["superadmin", "admin", "secretario", "moderador"].includes(cambio.rol) } } : {}),
++    });
++  }
++  const actualizacion = {
++    ...(cambio.rol ? { rol_asignado: cambio.rol } : {}),
++    ...(cambio.nombre_completo ? { nombre_completo: cambio.nombre_completo } : {}),
++  };
++  await ModeloPreasignacionUsuario.findOneAndUpdate({ correo_electronico: correo }, { $set: actualizacion });
++  if (usuario) await ModeloUsuario.findOneAndUpdate({ id_clerk: usuario.id, correo_electronico: correo }, { $set: {
++    fecha_actualizacion: new Date(), ...(cambio.rol ? { rol: cambio.rol } : {}),
++    ...(cambio.nombre_completo ? { nombre_completo: cambio.nombre_completo } : {}),
++    ...(cambio.activo !== undefined ? { activo: cambio.activo } : {}),
++  } });
++  let modificado = false;
++  for (const p of almacen.preasignaciones || []) if (p.correo_electronico.toLowerCase() === correo) {
++    Object.assign(p, actualizacion); modificado = true;
++  }
++  if (modificado) guardar_almacen_local(almacen);
++}
+diff --git a/src/modelos/BloqueoAdministrativo.ts b/src/modelos/BloqueoAdministrativo.ts
+new file mode 100644
+index 0000000..1daf184
+--- /dev/null
++++ b/src/modelos/BloqueoAdministrativo.ts
+@@ -0,0 +1,11 @@
++import mongoose, { Schema } from "mongoose";
++
++// _id tiene índice único nativo. Sin TTL: un proceso interrumpido no debe
++// permitir que otra instancia escriba mientras una petición a Clerk sigue viva.
++const EsquemaBloqueoAdministrativo = new Schema({
++  _id: { type: String, required: true },
++  fecha_creacion: { type: Date, default: Date.now },
++});
++
++export const ModeloBloqueoAdministrativo = mongoose.models.BloqueoAdministrativo ||
++  mongoose.model("BloqueoAdministrativo", EsquemaBloqueoAdministrativo);
+diff --git a/tests/seguridad-administrativa.test.cjs b/tests/seguridad-administrativa.test.cjs
+new file mode 100644
+index 0000000..346ad31
+--- /dev/null
++++ b/tests/seguridad-administrativa.test.cjs
+@@ -0,0 +1,279 @@
++// Ejecuta handlers reales; solo los límites externos se sustituyen en memoria.
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const vm = require('node:vm');
++const ts = require('typescript');
++const root = path.resolve(__dirname, '..');
++
++function usuario(id, rol, correo = `${id}@example.test`) {
++  return { id, publicMetadata: { rol, dato_conservado: 'sí' },
++    emailAddresses: [{ id: `email_${id}`, emailAddress: correo, verification: { status: 'verified' } }],
++    primaryEmailAddressId: `email_${id}`, firstName: 'Nombre', lastName: 'Prueba',
++    banned: false, locked: false, createdAt: 1 };
++}
++
++function entorno(rol = 'superadmin') {
++  const actor = usuario('user_actor', rol);
++  const target = usuario('user_target', 'ciudadano');
++  const state = { sesion: actor.id, users: [actor, target], local: { preasignaciones: [] },
++    pre: [], mongoUsers: [], writes: [], locks: new Set(), failClerk: false, failDB: false, beforeUpdate: null };
++  const users = {
++    getUser: async id => { if (state.failClerk) throw Error('Clerk no disponible');
++      const u = state.users.find(u => u.id === id); if (!u) throw Object.assign(Error('No existe'), { status: 404 }); return structuredClone(u); },
++    getUserList: async (p = {}) => { if (state.failClerk) throw Error('Clerk no disponible');
++      const data = state.users.filter(u => !p.emailAddress || u.emailAddresses.some(e => p.emailAddress.includes(e.emailAddress)));
++      return { data: structuredClone(data), totalCount: data.length }; },
++    updateUser: async (id, payload) => { if (state.failClerk) throw Error('Clerk no disponible');
++      if (state.beforeUpdate) await state.beforeUpdate(id,payload);
++      state.writes.push(['clerk:update', id, payload]); const u = state.users.find(u => u.id === id); Object.assign(u, payload); return u; },
++    deleteUser: async id => { state.writes.push(['clerk:delete', id]); state.users = state.users.filter(u => u.id !== id); },
++  };
++  function match(u, q) { return Object.entries(q).every(([k,v]) => k === '$or' ? v.some(f => match(u,f)) : u[k] === v); }
++  function modelo(key) { return {
++    find: () => ({ sort: async () => [], then: (resolve, reject) => Promise.resolve(structuredClone(state[key])).then(resolve,reject) }),
++    findOne: async q => structuredClone(state[key].find(u => match(u,q)) || null),
++    findOneAndUpdate: async (q, update, opts) => {
++      state.writes.push([`${key}:update`, q, update]); let u = state[key].find(u => match(u,q));
++      if (!u && opts?.upsert) state[key].push(u = { ...q });
++      if (u) Object.assign(u, update.$set || update); return u || null;
++    },
++    deleteOne: async q => { state.writes.push([`${key}:delete`,q]); state[key] = state[key].filter(u => !match(u,q)); return { deletedCount: 1 }; },
++    create: async data => { state.writes.push([`${key}:create`,data]); return data; },
++  }; }
++  let middleware;
++  const stubs = {
++    '@clerk/backend': { createClerkClient: () => ({ users }) },
++    '@clerk/nextjs/server': { auth: async () => ({ userId: state.sesion }),
++      clerkMiddleware: fn => { middleware = fn; return fn; },
++      createRouteMatcher: patterns => req => patterns.some(p => new RegExp('^' + p + '$').test(new URL(req.url).pathname)) },
++    'next/server': { NextResponse: { json: (body, init) => Response.json(body, init),
++      next: () => new Response(null, {status: 200}), redirect: url => Response.redirect(url) } },
++    '@/lib/base_datos': { conectar_base_datos: async () => { if (state.failDB) throw Error('BD no disponible'); } },
++    '@/lib/almacen_local': { leer_almacen_local: () => structuredClone(state.local),
++      guardar_almacen_local: data => { state.writes.push(['local:write']); state.local = structuredClone(data); } },
++    '@/modelos/Usuario': { ModeloUsuario: modelo('mongoUsers') },
++    '@/modelos/PreasignacionUsuario': { ModeloPreasignacionUsuario: modelo('pre') },
++    '@/modelos/Rol': { ModeloRol: modelo('pre') },
++    '@/modelos/BloqueoAdministrativo': { ModeloBloqueoAdministrativo: {
++      create: async ({_id}) => { if (state.locks.has(_id)) throw Object.assign(Error('Bloqueado'),{code:11000}); state.locks.add(_id); },
++      deleteOne: async ({_id}) => { state.locks.delete(_id); },
++    } },
++  };
++  const cache = new Map();
++  function load(file) {
++    if (cache.has(file)) return cache.get(file).exports;
++    const module = { exports: {} }; cache.set(file,module);
++    const code = ts.transpileModule(fs.readFileSync(file,'utf8'), {compilerOptions:{ module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }}).outputText;
++    const req = name => {
++      if (stubs[name]) return stubs[name];
++      if (name.startsWith('@/')) return load(path.join(root,'src',name.slice(2)) + '.ts');
++      if (name.startsWith('.')) return load(path.resolve(path.dirname(file),name) + '.ts');
++      throw Error(`Dependencia externa no permitida en prueba: ${name}`);
++    };
++    vm.runInNewContext('(function(require,module,exports){' + code + '\n})',
++      { process: {env:{}}, console: {log(){},warn(){},error(){}}, Response, URL, Date, Set, Map })(req,module,module.exports);
++    return module.exports;
++  }
++  return { state, actor, target, load,
++    async call(endpoint, method, body, query = '') {
++      const mod = load(path.join(root,'src/app/api',endpoint,'route.ts'));
++      return mod[method](new Request(`http://localhost/api/${endpoint}${query}`, {
++        method, ...(body === undefined ? {} : {body:JSON.stringify(body),headers:{'Content-Type':'application/json'}}) }));
++    },
++    async middle(endpoint, method) {
++      load(path.join(root,'src/middleware.ts'));
++      return middleware(async () => ({userId:state.sesion,sessionClaims:{metadata:{rol:'superadmin'}}}),
++        new Request(`http://localhost/api/${endpoint}`,{method}));
++    },
++  };
++}
++
++const operaciones = [ ['usuarios','GET'], ['usuarios','PUT'], ['usuarios','DELETE'],
++  ['roles','GET'], ['roles','POST'], ['usuarios/preasignar','POST'], ['usuarios/preasignar','DELETE'] ];
++for (const rol of [null, 'ciudadano', 'conductor', 'secretario', 'moderador', 'camion', 'desconocido']) {
++  for (const [endpoint,method] of operaciones) test(`${rol || 'anónimo'}: ${method} ${endpoint} denegado antes de escribir`, async () => {
++    const e = entorno(rol); if (!rol) e.state.sesion = null;
++    const r = await e.call(endpoint,method,method === 'PUT' || method === 'POST' ? {} : undefined);
++    assert.equal(r.status, rol ? 403 : 401); assert.equal(e.state.writes.length,0);
++  });
++}
++for (const [endpoint,method] of operaciones) test(`middleware deniega anónimo ${method} ${endpoint}`, async () => {
++  const e=entorno(); e.state.sesion=null; assert.equal((await e.middle(endpoint,method)).status,401);
++});
++test('middleware ignora claims privilegiados obsoletos', async () => {
++  const e=entorno('ciudadano'); assert.equal((await e.middle('usuarios','GET')).status,403);
++});
++for (const rol of ['admin','superadmin']) for (const endpoint of ['usuarios','roles']) test(`${rol} consulta ${endpoint}`, async () => {
++  assert.equal((await entorno(rol).call(endpoint,'GET')).status,200);
++});
++test('admin cambia nombre y rol inferior', async () => {
++  const e=entorno('admin'); const r=await e.call('usuarios','PUT',{id_usuario:e.target.id,correo_electronico:'user_target@example.test',nuevo_rol:'conductor',nombre_completo:'Nuevo Nombre'});
++  assert.equal(r.status,200); assert.equal(e.state.users[1].publicMetadata.rol,'conductor');
++  assert.equal(e.state.users[1].publicMetadata.dato_conservado,'sí');
++});
++for (const rol of ['admin','superadmin','dinamico']) test(`admin no modifica cuenta ${rol}, ni su nombre`, async () => {
++  const e=entorno('admin'); e.target.publicMetadata.rol=rol;
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nombre_completo:'Cambio'})).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++for (const rol of ['admin','superadmin','dinamico']) test(`admin no asigna ${rol}`, async () => {
++  const e=entorno('admin'); assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nuevo_rol:rol})).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++for (const [endpoint,method] of [['usuarios','DELETE'],['roles','POST']]) test(`admin no puede ${method} ${endpoint}`,async()=>{
++  const e=entorno('admin'); assert.equal((await e.call(endpoint,method,method==='POST'?{nombre:'nuevo',descripcion:'Prueba'}:undefined,'?id=user_target')).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++test('admin no se autoeleva',async()=>{
++  const e=entorno('admin'); assert.equal((await e.call('usuarios','PUT',{id_usuario:e.actor.id,nuevo_rol:'superadmin'})).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++for (const method of ['PUT','DELETE']) test(`fundador protegido de ${method}`,async()=>{
++  const e=entorno(); e.target.id='user_3JzRT8FQJPrqKEfk2QdjZpFaRVN';
++  const r=await e.call('usuarios',method,method==='PUT'?{id_usuario:e.target.id,nuevo_rol:'ciudadano',activo:false}:undefined,`?id=${e.target.id}`);
++  assert.equal(r.status,403); assert.equal(e.state.writes.length,0);
++});
++for (const body of [{nuevo_rol:'ciudadano'},{activo:false}]) test(`superadmin protegido: ${JSON.stringify(body)}`,async()=>{
++  const e=entorno(); e.target.publicMetadata.rol='superadmin';
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,...body})).status,403); assert.equal(e.state.writes.length,0);
++});
++test('último superadmin no puede eliminarse a sí mismo',async()=>{
++  const e=entorno(); assert.equal((await e.call('usuarios','DELETE',undefined,'?id=user_actor')).status,403); assert.equal(e.state.writes.length,0);
++});
++test('borrados concurrentes de superadmins quedan bloqueados',async()=>{
++  const e=entorno(); e.target.publicMetadata.rol='superadmin';
++  const res=await Promise.all([e.call('usuarios','DELETE',undefined,'?id=user_actor'),e.call('usuarios','DELETE',undefined,'?id=user_target')]);
++  assert.deepEqual(res.map(r=>r.status),[403,403]); assert.equal(e.state.writes.length,0);
++});
++for (const method of ['PUT','DELETE']) test(`ID/correo inconsistentes en ${method}`,async()=>{
++  const e=entorno(); const r=await e.call('usuarios',method,method==='PUT'?{id_usuario:e.target.id,correo_electronico:'otra@example.test',nuevo_rol:'conductor'}:undefined,'?id=user_target&correo=otra@example.test');
++  assert.equal(r.status,400); assert.equal(e.state.writes.length,0);
++});
++test('superadmin elimina cuenta inferior con identidad concordante',async()=>{
++  const e=entorno(); const r=await e.call('usuarios','DELETE',undefined,'?id=user_target&correo=user_target@example.test');
++  assert.equal(r.status,200); assert.equal(e.state.users.some(u=>u.id==='user_target'),false);
++});
++for (const rol of ['admin','superadmin','dinamico']) test(`preasignación no permite a admin asignar ${rol}`,async()=>{
++  const e=entorno('admin'); const r=await e.call('usuarios/preasignar','POST',{correo_electronico:'nuevo@example.test',nombre_completo:'Nuevo',rol_asignado:rol});
++  assert.equal(r.status,403); assert.equal(e.state.writes.length,0);
++});
++test('preasignar no permite degradar superadmin existente',async()=>{
++  const e=entorno(); e.target.publicMetadata.rol='superadmin';
++  const r=await e.call('usuarios/preasignar','POST',{correo_electronico:'user_target@example.test',nombre_completo:'Nuevo',rol_asignado:'ciudadano'});
++  assert.equal(r.status,403); assert.equal(e.state.writes.length,0);
++});
++test('admin no altera preasignación admin pendiente en MongoDB',async()=>{
++  const e=entorno('admin'); e.state.pre.push({correo_electronico:'pendiente@example.test',rol_asignado:'admin'});
++  const r=await e.call('usuarios/preasignar','DELETE',undefined,'?correo=pendiente@example.test');
++  assert.equal(r.status,403); assert.equal(e.state.writes.length,0);
++});
++test('admin crea preasignación inferior',async()=>{
++  const e=entorno('admin'); const r=await e.call('usuarios/preasignar','POST',{correo_electronico:'nuevo@example.test',nombre_completo:'Nuevo',rol_asignado:'conductor'});
++  assert.equal(r.status,200); assert.equal(e.state.local.preasignaciones[0].rol_asignado,'conductor');
++});
++test('fallo Clerk deniega sin mutaciones',async()=>{
++  const e=entorno(); e.state.failClerk=true; const r=await e.call('usuarios','DELETE',undefined,'?id=user_target');
++  assert.equal(r.status,503); assert.equal(e.state.writes.length,0);
++});
++test('BD inaccesible bloquea verificación de preasignación',async()=>{
++  const e=entorno('admin'); e.state.failDB=true;
++  const r=await e.call('usuarios/preasignar','POST',{correo_electronico:'nuevo@example.test',nombre_completo:'Nuevo',rol_asignado:'conductor'});
++  assert.equal(r.status,503); assert.equal(e.state.writes.length,0);
++});
++test('admin cancela preasignación inferior sin eliminar cuenta Clerk',async()=>{
++  const e=entorno('admin'); e.state.pre.push({correo_electronico:'pendiente@example.test',rol_asignado:'conductor'});
++  e.state.local.preasignaciones.push({correo_electronico:'pendiente@example.test',rol_asignado:'conductor'});
++  const r=await e.call('usuarios/preasignar','DELETE',undefined,'?correo=pendiente@example.test');
++  assert.equal(r.status,200); assert.equal(e.state.pre.length,0); assert.equal(e.state.local.preasignaciones.length,0);
++  assert.equal(e.state.users.length,2);
++});
++test('superadmin crea rol dinámico sin habilitar su asignación',async()=>{
++  const e=entorno();
++  assert.equal((await e.call('roles','POST',{nombre:'auditor',descripcion:'Lectura',permisos:['usuarios:ver']})).status,200);
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nuevo_rol:'auditor'})).status,403);
++});
++test('superadmin asigna superadmin a otra cuenta inferior',async()=>{
++  const e=entorno(); const r=await e.call('usuarios','PUT',{id_usuario:e.target.id,nuevo_rol:'superadmin'});
++  assert.equal(r.status,200); assert.equal(e.state.users[1].publicMetadata.rol,'superadmin');
++});
++test('superadmin puede cambiar nombre de otro admin',async()=>{
++  const e=entorno(); e.target.publicMetadata.rol='admin';
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nombre_completo:'Nombre Permitido'})).status,200);
++  assert.equal(e.state.users[1].firstName,'Nombre');
++});
++test('identidad MongoDB discordante bloquea borrado antes de Clerk',async()=>{
++  const e=entorno(); e.state.mongoUsers.push({id_clerk:'user_otro',correo_electronico:'user_target@example.test',rol:'ciudadano'});
++  assert.equal((await e.call('usuarios','DELETE',undefined,'?id=user_target')).status,409);
++  assert.equal(e.state.writes.length,0);
++});
++test('rol privilegiado local impide edición por admin',async()=>{
++  const e=entorno('admin'); e.state.local.preasignaciones.push({correo_electronico:'user_target@example.test',rol_asignado:'superadmin'});
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nombre_completo:'Cambio'})).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++test('rol con nombre de propiedad heredada se deniega',async()=>{
++  const e=entorno('__proto__'); assert.equal((await e.call('usuarios','GET')).status,403);
++});
++test('correo fundador no verificado no concede permisos',async()=>{
++  const e=entorno('ciudadano'); e.actor.emailAddresses[0].emailAddress='22610282@utgz.edu.mx';
++  e.actor.emailAddresses[0].verification.status='unverified';
++  assert.equal((await e.call('usuarios','GET')).status,403);
++});
++test('correo fundador verificado conserva protección existente',async()=>{
++  const e=entorno(); e.target.emailAddresses[0].emailAddress='22610282@utgz.edu.mx';
++  assert.equal((await e.call('usuarios','DELETE',undefined,'?id=user_target')).status,403);
++  assert.equal(e.state.writes.length,0);
++});
++test('Clerk no disponible al resolver objetivo bloquea antes de escribir',async()=>{
++  const e=entorno(); e.state.users=e.state.users.filter(u=>u.id!==e.target.id);
++  assert.equal((await e.call('usuarios','DELETE',undefined,'?id=user_target')).status,404);
++  assert.equal(e.state.writes.length,0);
++});
++test('parámetros con objetos en lugar de identidad se rechazan',async()=>{
++  const e=entorno(); assert.equal((await e.call('usuarios','PUT',{id_usuario:{$ne:null},nuevo_rol:'conductor'})).status,400);
++  assert.equal(e.state.writes.length,0);
++});
++test('middleware permite consulta admin y bloquea creación de roles',async()=>{
++  const e=entorno('admin'); assert.equal((await e.middle('roles','GET')).status,200);
++  assert.equal((await e.middle('roles','POST')).status,403);
++});
++test('promoción y edición inferior concurrentes no pueden violar la matriz',async()=>{
++  const e=entorno('admin'); let entrar; let continuar;
++  const dentro=new Promise(resolve=>{entrar=resolve;});
++  const desbloqueado=new Promise(resolve=>{continuar=resolve;});
++  e.state.beforeUpdate=async()=>{e.state.beforeUpdate=null; entrar(); await desbloqueado;};
++  const pendiente=e.call('usuarios','PUT',{id_usuario:e.target.id,nuevo_rol:'conductor'});
++  await dentro;
++  // Segunda solicitud autenticada por otro superadmin, mismo objetivo por correo.
++  const superadmin=usuario('user_supervisor','superadmin'); e.state.users.push(superadmin); e.state.sesion=superadmin.id;
++  const promocion=await e.call('usuarios','PUT',{correo_electronico:'user_target@example.test',nuevo_rol:'superadmin'});
++  continuar(); const primera=await pendiente;
++  assert.equal(promocion.status,409); assert.equal(primera.status,200);
++  assert.equal(e.state.users[1].publicMetadata.rol,'conductor'); assert.equal(e.state.locks.size,0);
++});
++test('bloqueo persistente impide modificar cuenta hasta recuperación explícita',async()=>{
++  const e=entorno(); e.state.locks.add('user_target');
++  const r=await e.call('usuarios','DELETE',undefined,'?id=user_target');
++  assert.equal(r.status,409); assert.equal(e.state.writes.length,0); assert.equal(e.state.locks.size,1);
++});
++test('fallo remoto incierto conserva bloqueo y evita reintentar escrituras',async()=>{
++  const e=entorno(); e.state.beforeUpdate=async()=>{throw Error('Resultado remoto incierto');};
++  const body={id_usuario:e.target.id,nuevo_rol:'conductor'};
++  assert.equal((await e.call('usuarios','PUT',body)).status,503);
++  assert.equal(e.state.locks.has('user_target'),true);
++  assert.equal((await e.call('usuarios','PUT',body)).status,409);
++});
++test('rechazo por privilegios libera bloqueo sin mutaciones de cuenta',async()=>{
++  const e=entorno('admin'); e.target.publicMetadata.rol='admin';
++  assert.equal((await e.call('usuarios','PUT',{id_usuario:e.target.id,nombre_completo:'Cambio'})).status,403);
++  assert.equal(e.state.locks.size,0); assert.equal(e.state.writes.length,0);
++});
++for (const method of ['PUT','DELETE']) test(`${method} inexistente no bloquea una preasignación posterior`,async()=>{
++  const e=entorno();
++  const r=await e.call('usuarios',method,method==='PUT'?{correo_electronico:'nuevo@example.test',nombre_completo:'Nuevo'}:undefined,'?correo=nuevo@example.test');
++  assert.equal(r.status,404); assert.equal(e.state.writes.length,0); assert.equal(e.state.locks.size,0);
++  const pre=await e.call('usuarios/preasignar','POST',{correo_electronico:'nuevo@example.test',nombre_completo:'Nuevo',rol_asignado:'conductor'});
++  assert.equal(pre.status,200);
++});
+diff --git a/docs/superpowers/plans/2026-11-11-fase-2a.md b/docs/superpowers/plans/2026-11-11-fase-2a.md
+new file mode 100644
+index 0000000..2d8912b
+--- /dev/null
++++ b/docs/superpowers/plans/2026-11-11-fase-2a.md
+@@ -0,0 +1,67 @@
++# Fase 2A — plan de implementación
++
++Objetivo y especificación: matriz y precisiones aprobadas en la conversación.
++Ejecución local en la rama actual por autorización expresa; sin commits,
++dependencias nuevas ni escrituras en servicios reales.
++
++Arquitectura: autorización central basada en auth() y getUser() de Clerk.
++Matriz cerrada de roles conocidos. Resolver el objetivo antes de cualquier
++escritura; verificar correo/ID y roles de preasignaciones en ambas fuentes.
++Middleware añade defensa por método y los handlers verifican de nuevo.
++
++1. Escribir y ejecutar pruebas aisladas de handlers y middleware, con Clerk,
++   MongoDB y archivo local sustituidos por almacenes en memoria. Observar fallos.
++2. Crear src/lib/autorizacion.ts (identidad, matriz, objetivos y errores) y
++   src/lib/usuarios_administrativos.ts (objetivos pendientes y persistencia).
++3. Integrar GET/PUT/DELETE de usuarios, GET/POST de roles, POST/DELETE de
++   preasignar y middleware; conservar contratos exito/mensaje/datos.
++4. Ejecutar pruebas y TypeScript sin caché incremental; revisar diff completo.
++
++Focos de revisión: permisos revocados en claims antiguos; discrepancia ID/correo;
++fallos de Clerk/BD antes de mutaciones; cuentas elevadas en otra fuente;
++degradaciones indirectas mediante preasignación y campo activo.
++
++Decisión de seguridad: Clerk no ofrece compare-and-swap entre lectura de roles
++y modificación/borrado de cuentas. Se bloquea toda eliminación, degradación o
++desactivación de superadmin, sin contar cuentas ni usar un mutex local.
++El fundador se protege por los identificadores ya presentes en el proyecto.
++Un correo no verificado no concede privilegios de fundador.
++
++Revisión de concurrencia: la primera implementación validaba un snapshot y
++permitía que admin escribiera después de una promoción concurrente. Se agregó
++ModeloBloqueoAdministrativo: creación por _id único canónico de Clerk (o correo
++para pendientes), relectura del actor y objetivo dentro del bloqueo y exclusión
++persistente entre los cuatro métodos que modifican cuentas/preasignaciones.
++Sin TTL, liberación al completar o al rechazar antes de escribir; resultados
++remotos inciertos conservan bloqueo. Los bloqueos no son parte de las cuentas.
++
++Límite operativo: no hay una transacción distribuida Clerk/MongoDB/archivo.
++Un fallo después de escribir puede dejar cambios parciales y una cuenta bloqueada.
++La recuperación requiere detener/verificar la ausencia de operaciones en vuelo,
++reconciliar las fuentes y retirar explícitamente el bloqueo abandonado por un
++operador autorizado. No se implementa un endpoint de desbloqueo ni reintento
++automático. Sin MongoDB no se permiten mutaciones administrativas.
++
++Límite del bloqueo: coordina estos endpoints de Dashboard_V3, no cambios
++manuales en Clerk, otros servicios o sincronizar. El flujo de sincronización
++preexistente (incluida su identificación de fundador por correo) queda fuera
++de Fase 2A y debe revisarse por separado. Tampoco se corrigen aquí XSS de mapas,
++persistencia de rutas ni el hecho de que activo en MongoDB no revoca sesiones.
++
++Verificaciones: suite inicial 6/88 correctas y 82 fallos antes de implementar;
++suite final ampliada 106/106 correctas. Incluye intercalado determinista de
++promoción/modificación, bloqueo abandonado y fallo remoto incierto. TypeScript
++se ejecuta con --noEmit --incremental false. Clerk instalado: nextjs 6.39.8,
++backend 2.33.8; APIs verificadas en declaraciones locales oficiales del SDK.
++No se ejecutan build ni scripts legacy para evitar cargar configuración y
++servicios reales. Se conserva el grafo previo, identificado como desactualizado.
++
++No se ejecutará scripts/test_usuarios_api.mjs: usa un servicio real y contiene
++una credencial literal preexistente. No se reproduce su valor ni se modifica
++en esta fase; debe revocarse por el responsable de la cuenta.
++
++Revisión independiente: se confirmó unicidad nativa del bloqueo y cobertura
++por los endpoints. Se corrigió también una retención indebida tras 404 sin
++mutaciones: comprobar existencia antes de iniciar escrituras. Pruebas PUT y
++DELETE inexistentes seguidos de preasignación pasaron de fallo a éxito.
++Última suite: npm test, 106/106; TypeScript sin errores; git diff --check limpio.

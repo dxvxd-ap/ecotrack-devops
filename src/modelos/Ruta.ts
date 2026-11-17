@@ -63,6 +63,9 @@ const EsquemaRuta = new Schema<InterfazRuta>(
     },
   },
   {
+    // La preparación de colecciones/índices es explícita; leer rutas no debe crear datos.
+    autoCreate: false,
+    autoIndex: false,
     timestamps: { createdAt: "fecha_creacion", updatedAt: "fecha_actualizacion" },
   }
 );
