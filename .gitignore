@@ -54,7 +54,7 @@ yarn-error.log*
 
 # Otros
 text.txt
-/agents
+/.agents
 AGENTS.md
 datos_locales_respaldo.example.json
 datos_locales_respaldo.json
