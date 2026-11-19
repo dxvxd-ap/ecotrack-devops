@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloSuscripcionPush, PlataformaDispositivo } from "@/modelos/SuscripcionPush";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export async function POST(peticion: NextRequest) {
   try {
@@ -45,14 +46,6 @@ export async function POST(peticion: NextRequest) {
       datos: suscripcionActualizada,
     });
   } catch (error: any) {
-    console.error("[Push] Error al registrar token push:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al registrar el token push.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "push:registrar-token");
   }
 }

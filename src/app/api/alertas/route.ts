@@ -5,6 +5,7 @@ import {
   buscarTokensPorRuta,
   enviarNotificacionesPush,
 } from "@/lib/pushNotifications";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export async function GET(peticion: NextRequest) {
   try {
@@ -49,15 +50,7 @@ export async function GET(peticion: NextRequest) {
       total: alertas.length,
     });
   } catch (error: any) {
-    console.error("[Alertas] Error al consultar alertas:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al consultar el historial de alertas.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "alertas:consultar");
   }
 }
 
@@ -170,14 +163,6 @@ export async function POST(peticion: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
-    console.error("[Alertas] Error al emitir alerta:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al emitir la alerta.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "alertas:emitir");
   }
 }

@@ -6,6 +6,7 @@ import {
   PrioridadReporte,
   EstadoReporte,
 } from "@/modelos/Reporte";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export async function GET(peticion: NextRequest) {
   try {
@@ -57,15 +58,7 @@ export async function GET(peticion: NextRequest) {
       total: reportes.length,
     });
   } catch (error: any) {
-    console.error("[Reportes] Error al consultar reportes:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al consultar los reportes.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "reportes:consultar");
   }
 }
 
@@ -180,14 +173,6 @@ export async function POST(peticion: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
-    console.error("[Reportes] Error al crear reporte:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al crear el reporte.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "reportes:crear");
   }
 }

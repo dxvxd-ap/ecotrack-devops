@@ -222,5 +222,5 @@ export function validar_gestion_objetivo(actor: ActorAdministrativo, objetivo: {
 export function respuesta_error_administrativo(error: unknown) {
   const status = error instanceof ErrorAdministrativo ? error.status : error instanceof SyntaxError ? 400 : 503;
   const mensaje = error instanceof ErrorAdministrativo ? error.message : status === 400 ? "JSON inválido" : "No se pudo completar la operación administrativa";
-  return NextResponse.json({ exito: false, mensaje }, { status });
+  return NextResponse.json({ ok: false, exito: false, mensaje }, { status });
 }

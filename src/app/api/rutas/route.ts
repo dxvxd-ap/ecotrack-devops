@@ -18,7 +18,7 @@ function fallo(error: unknown) {
     : mongo?.name === 'ValidationError' || mongo?.name === 'CastError' || mongo?.name === 'SyntaxError'
       ? new ErrorRuta(400, 'ENTRADA_INVALIDA', 'Los datos de la ruta no son válidos')
       : new ErrorRuta(503, 'BASE_DATOS_NO_DISPONIBLE', 'No se pudo confirmar la operación en la base de datos');
-  return NextResponse.json({ exito: false, mensaje: conocido.message, codigo: conocido.codigo },
+  return NextResponse.json({ ok: false, exito: false, mensaje: conocido.message, codigo: conocido.codigo },
     { status: conocido.status, headers: { 'Cache-Control': 'no-store' } });
 }
 function noEncontrada(): never { throw new ErrorRuta(404, 'RUTA_NO_ENCONTRADA', 'No se encontró la ruta indicada'); }

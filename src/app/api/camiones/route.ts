@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloCamion } from "@/modelos/Camion";
 import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export async function GET() {
   try {
@@ -66,9 +67,6 @@ export async function POST(peticion: NextRequest) {
       datos: nuevo_camion,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al registrar camión", detalle: error.message },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "camiones:crear");
   }
 }

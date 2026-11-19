@@ -4,6 +4,7 @@ import { ModeloAsignacionCalendario } from "@/modelos/AsignacionCalendario";
 import { ModeloRuta } from "@/modelos/Ruta";
 import "@/modelos/Camion"; // Asegurar registro del modelo Camion para populate
 import { leer_almacen_local, guardar_almacen_local } from "@/lib/almacen_local";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 function normalizarDia(texto: string): string {
   return (texto || "")
@@ -233,10 +234,7 @@ export async function POST(peticion: NextRequest) {
       datos: nueva_asignacion,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al registrar turno o excepción", detalle: error.message },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "calendario:crear");
   }
 }
 
@@ -298,10 +296,7 @@ export async function PUT(peticion: NextRequest) {
       datos: asig,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al actualizar asignación", detalle: error.message },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "calendario:actualizar");
   }
 }
 
@@ -333,9 +328,6 @@ export async function DELETE(peticion: NextRequest) {
       mensaje: "Excepción eliminada. Se restaura el turno oficial recurrente.",
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { exito: false, mensaje: "Error al eliminar excepción", detalle: error.message },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "calendario:eliminar");
   }
 }

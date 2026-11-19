@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReporte, EstadoReporte, PrioridadReporte } from "@/modelos/Reporte";
+import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export async function PATCH(
   peticion: NextRequest,
@@ -80,14 +81,6 @@ export async function PATCH(
       datos: reporteActualizado,
     });
   } catch (error: any) {
-    console.error("[Reportes] Error al actualizar reporte:", error);
-    return NextResponse.json(
-      {
-        exito: false,
-        mensaje: "Error interno al actualizar el reporte.",
-        detalle: error.message,
-      },
-      { status: 500 }
-    );
+    return manejarErrorApi(error, "reportes:actualizar");
   }
 }
