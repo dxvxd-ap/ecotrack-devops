@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { ProveedorTema } from "@/context/TemaContext";
 import { BotonTema } from "@/componentes/dashboard/BotonTema";
+import { BadgePendientesReportes } from "@/componentes/dashboard/BadgePendientesReportes";
 
 export default function DisenoDashboard({
   children,
@@ -109,10 +110,13 @@ export default function DisenoDashboard({
 
             <Link
               href="/dashboard/reportes"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
+              className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
             >
-              <AlertOctagon className="w-4 h-4 text-rose-400" />
-              <span>Reportes e Incidentes</span>
+              <div className="flex items-center gap-3">
+                <AlertOctagon className="w-4 h-4 text-rose-400" />
+                <span>Reportes e Incidentes</span>
+              </div>
+              <BadgePendientesReportes />
             </Link>
 
             <Link

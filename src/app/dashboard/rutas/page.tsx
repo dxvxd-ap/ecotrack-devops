@@ -1,7 +1,7 @@
 "use client";
 
-import { puedeEditarGeometria } from "@/lib/rutas_mapa";
-import { useState, useEffect } from "react";
+import { puedeEditarGeometria, normalizarRuta } from "@/lib/rutas_mapa";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Skeleton from "react-loading-skeleton";
 import {
@@ -12,15 +12,14 @@ import {
   Save,
   Palette,
   Compass,
-  AlertCircle,
   CheckCircle2,
-  Navigation,
   Route as IconoRuta,
   Edit2,
   X,
   Calendar,
   Clock,
   Truck,
+  Pipette,
 } from "lucide-react";
 
 // Importar mapa dinámicamente sin SSR para Leaflet
@@ -35,6 +34,71 @@ const MapaRutas = dynamic(
     ),
   }
 );
+
+/** Filtra coordenadas inválidas (null, undefined, NaN, fuera de rango) y duplicados consecutivos. */
+function filtrarCoordenadasValidas(coords: [number, number][]): [number, number][] {
+  const resultado: [number, number][] = [];
+  for (const punto of coords) {
+    if (
+      !punto ||
+      !Array.isArray(punto) ||
+      punto.length < 2 ||
+      typeof punto[0] !== "number" ||
+      typeof punto[1] !== "number" ||
+      !Number.isFinite(punto[0]) ||
+      !Number.isFinite(punto[1]) ||
+      Math.abs(punto[0]) > 90 ||
+      Math.abs(punto[1]) > 180
+    ) {
+      continue;
+    }
+    if (resultado.length > 0) {
+      const ultimo = resultado[resultado.length - 1];
+      if (ultimo[0] === punto[0] && ultimo[1] === punto[1]) continue;
+    }
+    resultado.push(punto);
+  }
+  return resultado;
+}
+
+/** Segmenta una polilínea cargada para que cada tramo corresponda con los puntos clave editables. */
+function segmentarRutaParaEdicion(coords_lat_lng: [number, number][]): {
+  puntos_clave: [number, number][];
+  tramos: [number, number][][];
+} {
+  const limpias = filtrarCoordenadasValidas(coords_lat_lng);
+  if (limpias.length === 0) return { puntos_clave: [], tramos: [] };
+  if (limpias.length === 1) return { puntos_clave: [limpias[0]], tramos: [] };
+
+  if (limpias.length <= 15) {
+    const tramos: [number, number][][] = [];
+    for (let i = 0; i < limpias.length - 1; i++) {
+      tramos.push([limpias[i], limpias[i + 1]]);
+    }
+    return { puntos_clave: limpias, tramos };
+  }
+
+  // Para rutas detalladas con decenas o cientos de vértices, distribuir de 8 a 16 paradas clave
+  const num_claves = Math.min(16, Math.max(8, Math.floor(limpias.length / 15)));
+  const paso = (limpias.length - 1) / (num_claves - 1);
+  const indices: number[] = [];
+  for (let i = 0; i < num_claves; i++) {
+    indices.push(Math.round(i * paso));
+  }
+  indices[indices.length - 1] = limpias.length - 1;
+
+  const indices_unicos = indices.filter((val, idx, arr) => idx === 0 || val > arr[idx - 1]);
+  const puntos_clave: [number, number][] = indices_unicos.map((i) => limpias[i]);
+  const tramos: [number, number][][] = [];
+
+  for (let i = 0; i < indices_unicos.length - 1; i++) {
+    const inicio = indices_unicos[i];
+    const fin = indices_unicos[i + 1];
+    tramos.push(limpias.slice(inicio, fin + 1));
+  }
+
+  return { puntos_clave, tramos };
+}
 
 // Calcular distancia geográfica total en km de la polilínea completa
 function calcular_distancia_geometria_km(puntos: [number, number][]): number {
@@ -84,7 +148,7 @@ export default function PaginaGestionRutas() {
   const [camion_asignado_id, fijar_camion_asignado_id] = useState("");
   const [camiones_disponibles, fijar_camiones_disponibles] = useState<any[]>([]);
 
-  // Estado de edición de ruta existente
+  // Estado de edición de ruta existente (copia profunda para no mutar el original al cancelar)
   const [ruta_en_edicion, fijar_ruta_en_edicion] = useState<any>(null);
 
   const DIAS_SEMANA = [
@@ -97,12 +161,26 @@ export default function PaginaGestionRutas() {
     { id: "domingo", etiqueta: "Dom", nombre: "Domingo" },
   ];
 
+  // Paleta enriquecida con 18 colores de alto contraste + selector hexadecimal personalizado
   const colores_disponibles = [
     { nombre: "Cobalto", hex: "#2f63ff" },
+    { nombre: "Azul Rey", hex: "#1d4ed8" },
+    { nombre: "Cian", hex: "#06b6d4" },
+    { nombre: "Turquesa", hex: "#0d9488" },
     { nombre: "Esmeralda", hex: "#10b981" },
+    { nombre: "Verde Bosque", hex: "#15803d" },
+    { nombre: "Lima", hex: "#84cc16" },
     { nombre: "Ámbar", hex: "#f59e0b" },
-    { nombre: "Púrpura", hex: "#8b5cf6" },
+    { nombre: "Naranja", hex: "#ea580c" },
+    { nombre: "Coral", hex: "#f97316" },
+    { nombre: "Bronce", hex: "#b45309" },
     { nombre: "Carmesí", hex: "#ef4444" },
+    { nombre: "Rojo Rubí", hex: "#dc2626" },
+    { nombre: "Rosa", hex: "#f43f5e" },
+    { nombre: "Magenta", hex: "#ec4899" },
+    { nombre: "Púrpura", hex: "#8b5cf6" },
+    { nombre: "Violeta", hex: "#7c3aed" },
+    { nombre: "Índigo", hex: "#6366f1" },
   ];
 
   const alternar_dia = (diaId: string) => {
@@ -115,14 +193,23 @@ export default function PaginaGestionRutas() {
     try {
       fijar_cargando(true);
       const [respRutas, respCamiones] = await Promise.all([
-        fetch("/api/rutas").then((r) => r.json()),
-        fetch("/api/camiones")
+        fetch("/api/rutas", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        }).then((r) => r.json()),
+        fetch("/api/camiones", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        })
           .then((r) => r.json())
           .catch(() => ({ exito: false })),
       ]);
 
       if (respRutas.exito) {
-        fijar_rutas(respRutas.datos || []);
+        const datos_normalizados = (respRutas.datos || [])
+          .map((r: any) => normalizarRuta(r))
+          .filter(Boolean);
+        fijar_rutas(datos_normalizados);
       }
       if (respCamiones.exito) {
         fijar_camiones_disponibles(respCamiones.datos || []);
@@ -140,22 +227,27 @@ export default function PaginaGestionRutas() {
 
   const distancia_calculada_km = calcular_distancia_geometria_km(coordenadas_detalle);
 
-  const manejar_actualizacion_trazado = (
-    nuevas_coords: [number, number][],
-    claves: [number, number][],
-    _distancia: number,
-    tramos?: [number, number][][]
-  ) => {
-    fijar_coordenadas_detalle(nuevas_coords);
-    fijar_puntos_clave(claves);
-    if (tramos !== undefined) {
-      fijar_tramos_historicos(tramos);
-    }
-  };
+  const manejar_actualizacion_trazado = useCallback(
+    (
+      nuevas_coords: [number, number][],
+      claves: [number, number][],
+      _distancia: number,
+      tramos?: [number, number][][]
+    ) => {
+      fijar_coordenadas_detalle(filtrarCoordenadasValidas(nuevas_coords));
+      fijar_puntos_clave(claves);
+      if (tramos !== undefined) {
+        fijar_tramos_historicos(tramos);
+      }
+    },
+    []
+  );
 
-  const deshacer_ultimo_punto = () => {
+  const deshacer_ultimo_punto = useCallback(() => {
     if (puntos_clave.length <= 1) {
-      limpiar_trazado_actual();
+      fijar_puntos_clave([]);
+      fijar_coordenadas_detalle([]);
+      fijar_tramos_historicos([]);
       return;
     }
 
@@ -178,8 +270,25 @@ export default function PaginaGestionRutas() {
 
     fijar_puntos_clave(nuevos_claves);
     fijar_tramos_historicos(nuevos_tramos);
-    fijar_coordenadas_detalle(nuevas_coords);
-  };
+    fijar_coordenadas_detalle(filtrarCoordenadasValidas(nuevas_coords));
+  }, [puntos_clave, tramos_historicos]);
+
+  // Atajo de teclado: Ctrl+Z o Cmd+Z para deshacer mientras se traza
+  useEffect(() => {
+    if (!modo_dibujo) return;
+    const manejarTeclas = (e: KeyboardEvent) => {
+      // Ignorar si el usuario está escribiendo en un input o textarea
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        deshacer_ultimo_punto();
+      }
+    };
+    window.addEventListener("keydown", manejarTeclas);
+    return () => window.removeEventListener("keydown", manejarTeclas);
+  }, [modo_dibujo, deshacer_ultimo_punto]);
 
   const limpiar_trazado_actual = () => {
     fijar_puntos_clave([]);
@@ -202,36 +311,37 @@ export default function PaginaGestionRutas() {
       fijar_mensaje_notificacion("Esta ruta se conserva sin cambios. El editor solo permite LineString de dos dimensiones; no permite editar MultiLineString ni unir sus segmentos.");
       return;
     }
-    fijar_ruta_en_edicion(r);
-    fijar_id_ruta(r.id_ruta || "");
-    fijar_nombre_ruta(r.nombre || "");
-    fijar_descripcion_ruta(r.descripcion || "");
-    fijar_color_seleccionado(r.color_mapa || "#2f63ff");
+
+    // Clonación profunda para no mutar el catálogo original si el usuario cancela
+    const copiaProfunda = structuredClone(r);
+    fijar_ruta_en_edicion(copiaProfunda);
+    fijar_id_ruta(copiaProfunda.id_ruta || "");
+    fijar_nombre_ruta(copiaProfunda.nombre || "");
+    fijar_descripcion_ruta(copiaProfunda.descripcion || "");
+    fijar_color_seleccionado(copiaProfunda.color_mapa || "#2f63ff");
 
     // Cargar programación oficial recurrente
-    fijar_dias_recoleccion(r.diasRecoleccion || r.dias_recoleccion || ["lunes", "miercoles", "viernes"]);
-    fijar_hora_inicio(r.horarioHabitual?.horaInicio || r.horario_habitual?.hora_inicio || "07:00");
-    fijar_hora_fin(r.horarioHabitual?.horaFin || r.horario_habitual?.hora_fin || "13:00");
-    const idCamion = r.camionAsignadoId?._id || r.camionAsignadoId || r.camion_asignado_id || "";
+    fijar_dias_recoleccion(copiaProfunda.diasRecoleccion || copiaProfunda.dias_recoleccion || ["lunes", "miercoles", "viernes"]);
+    fijar_hora_inicio(copiaProfunda.horarioHabitual?.horaInicio || copiaProfunda.horario_habitual?.hora_inicio || "07:00");
+    fijar_hora_fin(copiaProfunda.horarioHabitual?.horaFin || copiaProfunda.horario_habitual?.hora_fin || "13:00");
+    const idCamion = copiaProfunda.camionAsignadoId?._id || copiaProfunda.camionAsignadoId || copiaProfunda.camion_asignado_id || "";
     fijar_camion_asignado_id(idCamion);
 
-    // Convertir de GeoJSON [lon, lat] a [lat, lon] para Leaflet
-    if (r.trazado_geojson?.coordinates && Array.isArray(r.trazado_geojson.coordinates)) {
-      const coords_lat_lng: [number, number][] = r.trazado_geojson.coordinates.map(
+    // Convertir de GeoJSON [lon, lat] a [lat, lon] para Leaflet y segmentar adecuadamente
+    if (copiaProfunda.trazado_geojson?.coordinates && Array.isArray(copiaProfunda.trazado_geojson.coordinates)) {
+      const coords_lat_lng: [number, number][] = copiaProfunda.trazado_geojson.coordinates.map(
         ([lon, lat]: [number, number]) => [lat, lon]
       );
-      fijar_coordenadas_detalle(coords_lat_lng);
-      if (coords_lat_lng.length > 0) {
-        fijar_puntos_clave([coords_lat_lng[0], coords_lat_lng[coords_lat_lng.length - 1]]);
-        fijar_tramos_historicos([coords_lat_lng]);
-      } else {
-        fijar_puntos_clave([]);
-        fijar_tramos_historicos([]);
-      }
+      const coords_limpias = filtrarCoordenadasValidas(coords_lat_lng);
+      fijar_coordenadas_detalle(coords_limpias);
+
+      const { puntos_clave: claves, tramos } = segmentarRutaParaEdicion(coords_limpias);
+      fijar_puntos_clave(claves);
+      fijar_tramos_historicos(tramos);
     }
 
     fijar_modo_dibujo(true);
-    fijar_mensaje_notificacion(`Modo edición activado para "${r.nombre}". Puedes ajustar puntos en el mapa o editar los datos.`);
+    fijar_mensaje_notificacion(`Modo edición activado para "${copiaProfunda.nombre}". Puedes arrastrar vértices, insertar paradas o editar datos.`);
   };
 
   const guardar_nueva_ruta = async (e: React.FormEvent) => {
@@ -241,8 +351,9 @@ export default function PaginaGestionRutas() {
       return;
     }
 
-    if (coordenadas_detalle.length < 2) {
-      alert("Debes marcar al menos dos puntos en el mapa para trazar la ruta por las calles.");
+    const coords_validas = filtrarCoordenadasValidas(coordenadas_detalle);
+    if (coords_validas.length < 2) {
+      alert("Debes marcar al menos dos puntos válidos en el mapa para trazar la ruta por las calles.");
       return;
     }
 
@@ -251,7 +362,7 @@ export default function PaginaGestionRutas() {
       fijar_mensaje_notificacion("");
 
       // Formato GeoJSON: [longitud, latitud]
-      const coordenadas_geojson = coordenadas_detalle.map(([lat, lon]) => [lon, lat]);
+      const coordenadas_geojson = coords_validas.map(([lat, lon]) => [lon, lat]);
 
       const payload = {
         _id: ruta_en_edicion?._id,
@@ -327,7 +438,7 @@ export default function PaginaGestionRutas() {
             TRAZADO Y ADAPTACIÓN A CALLES
           </h1>
           <p className="text-xs text-zinc-400 font-sans mt-0.5">
-            Haz clic en los puntos clave y el sistema trazará la ruta adaptada automáticamente a las calles reales.
+            Haz clic en los puntos clave, arrastra vértices o añade paradas intermedias. El sistema adaptará el trazado automáticamente.
           </p>
         </div>
 
@@ -388,7 +499,7 @@ export default function PaginaGestionRutas() {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4 p-3 bg-zinc-950/60 rounded-xl border border-zinc-800 text-xs font-mono">
               <div className="flex items-center gap-4">
                 <span className="text-zinc-400">
-                  Paradas marcadas: <strong className="text-white">{puntos_clave.length}</strong>
+                  Paradas clave: <strong className="text-white">{puntos_clave.length}</strong>
                 </span>
                 <span className="text-zinc-400">
                   Vértices de calle: <strong className="text-white">{coordenadas_detalle.length}</strong>
@@ -401,18 +512,28 @@ export default function PaginaGestionRutas() {
               {puntos_clave.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={deshacer_ultimo_punto}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/60"
+                    title="Deshacer última parada (Ctrl+Z)"
                   >
                     <Undo2 className="w-3.5 h-3.5" />
-                    <span>Deshacer Parada</span>
+                    <span>Deshacer Parada (Ctrl+Z)</span>
                   </button>
                   <button
-                    onClick={limpiar_trazado_actual}
+                    type="button"
+                    onClick={() => {
+                      if (confirm("¿Deseas limpiar todos los puntos trazados?")) {
+                        fijar_puntos_clave([]);
+                        fijar_coordenadas_detalle([]);
+                        fijar_tramos_historicos([]);
+                      }
+                    }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg transition-colors"
+                    title="Limpiar puntos del mapa"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Limpiar</span>
+                    <span>Limpiar Puntos</span>
                   </button>
                 </div>
               )}
@@ -496,26 +617,69 @@ export default function PaginaGestionRutas() {
                   />
                 </div>
 
+                {/* Paleta expandida con 18 colores + picker hexadecimal */}
                 <div>
-                  <label className="block text-zinc-400 font-mono mb-1.5 flex items-center gap-1.5">
-                    <Palette className="w-3.5 h-3.5" />
-                    <span>COLOR EN EL MAPA</span>
-                  </label>
-                  <div className="flex gap-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-zinc-400 font-mono flex items-center gap-1.5">
+                      <Palette className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>COLOR EN EL MAPA</span>
+                    </label>
+                    <span className="font-mono text-[11px] font-semibold text-zinc-300 flex items-center gap-1">
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: color_seleccionado }}
+                      />
+                      {color_seleccionado.toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-2 p-2.5 bg-zinc-800/50 rounded-xl border border-zinc-700/60">
                     {colores_disponibles.map((c) => (
                       <button
                         key={c.hex}
                         type="button"
                         onClick={() => fijar_color_seleccionado(c.hex)}
                         style={{ backgroundColor: c.hex }}
-                        className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                          color_seleccionado === c.hex
-                            ? "border-white scale-110 shadow-lg"
-                            : "border-transparent opacity-70 hover:opacity-100"
+                        className={`h-7 w-full rounded-lg border-2 transition-transform ${
+                          color_seleccionado.toLowerCase() === c.hex.toLowerCase()
+                            ? "border-white scale-110 shadow-lg ring-2 ring-white/30"
+                            : "border-transparent opacity-75 hover:opacity-100 hover:scale-105"
                         }`}
                         title={c.nombre}
                       />
                     ))}
+                  </div>
+
+                  {/* Selector Hexadecimal personalizado */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="relative flex items-center">
+                      <input
+                        type="color"
+                        id="color_picker_custom"
+                        value={color_seleccionado.startsWith("#") ? color_seleccionado : "#2f63ff"}
+                        onChange={(e) => fijar_color_seleccionado(e.target.value)}
+                        className="w-8 h-8 rounded-lg cursor-pointer border border-zinc-700 bg-transparent p-0 overflow-hidden"
+                        title="Elegir color personalizado"
+                      />
+                    </div>
+                    <label
+                      htmlFor="color_picker_custom"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-[11px] font-mono text-zinc-300 border border-zinc-700 cursor-pointer transition-colors"
+                    >
+                      <Pipette className="w-3 h-3 text-zinc-400" />
+                      <span>Color libre</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={7}
+                      value={color_seleccionado}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        fijar_color_seleccionado(val);
+                      }}
+                      placeholder="#2F63FF"
+                      className="w-24 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-[11px] uppercase focus:outline-none focus:border-blue-500"
+                    />
                   </div>
                 </div>
 
@@ -604,7 +768,7 @@ export default function PaginaGestionRutas() {
 
                 <div className="p-3 bg-zinc-800/60 rounded-xl border border-zinc-700/50 space-y-1 font-mono text-[11px] text-zinc-300">
                   <div className="flex justify-between">
-                    <span className="text-zinc-500">Paradas:</span>
+                    <span className="text-zinc-500">Paradas clave:</span>
                     <span>{puntos_clave.length}</span>
                   </div>
                   <div className="flex justify-between">

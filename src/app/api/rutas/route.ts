@@ -3,12 +3,23 @@ import { autorizar_administracion, ErrorAdministrativo, respuesta_error_administ
 import { conectar_base_datos } from '@/lib/base_datos';
 import { ModeloRuta } from '@/modelos/Ruta';
 import { ErrorRuta, validarRutaActiva, esRutaPublicable, validarCreacionRuta, validarActualizacionRuta, validarBajaRuta } from '@/contratos/rutas';
+import { normalizarRuta } from '@/lib/rutas_mapa';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function respuesta(datos: unknown, mensaje?: string) {
-  return NextResponse.json({ exito: true, ...(mensaje ? { mensaje } : {}), datos }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(
+    { exito: true, ...(mensaje ? { mensaje } : {}), datos },
+    {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      },
+    }
+  );
 }
 function fallo(error: unknown) {
   if (error instanceof ErrorAdministrativo) return respuesta_error_administrativo(error);
@@ -39,7 +50,10 @@ export async function GET() {
       consulta = consulta.populate('camionAsignadoId', 'numero_unidad modelo matricula estado');
     }
     const rutas = await consulta.sort({ fecha_creacion: -1 });
-    return respuesta(rutas.filter((r: any) => esRutaPublicable(r.toObject ? r.toObject() : r)));
+    const normalizadas = rutas
+      .map((r: any) => normalizarRuta(r.toObject ? r.toObject() : r))
+      .filter((r: any) => r && r.activa !== false && esRutaPublicable(r));
+    return respuesta(normalizadas);
   } catch (error: unknown) { return fallo(error); }
 }
 export async function POST(peticion: NextRequest) {

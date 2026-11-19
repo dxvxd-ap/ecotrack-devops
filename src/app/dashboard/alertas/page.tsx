@@ -67,13 +67,13 @@ function ContenidoAlertas() {
     enviadosCount: number;
   } | null>(null);
 
-  // Cargar rutas y alertas
+  // Cargar rutas y alertas frescas sin caché
   const cargarDatos = async () => {
     try {
       fijarCargandoHistorial(true);
       const [resRutas, resAlertas] = await Promise.all([
-        fetch("/api/rutas").then((r) => r.json()),
-        fetch("/api/alertas?limite=50").then((r) => r.json()),
+        fetch("/api/rutas", { cache: "no-store", headers: { "Cache-Control": "no-cache" } }).then((r) => r.json()),
+        fetch("/api/alertas?limite=50", { cache: "no-store", headers: { "Cache-Control": "no-cache" } }).then((r) => r.json()),
       ]);
 
       if (resRutas.exito) {
@@ -102,12 +102,47 @@ function ContenidoAlertas() {
 
     if (pTitulo) fijarTitulo(decodeURIComponent(pTitulo));
     if (pMensaje) fijarMensaje(decodeURIComponent(pMensaje));
-    if (
-      pMotivo &&
-      ["dia_festivo", "suspension_ruta", "falla_camion", "retraso", "aviso_general"].includes(pMotivo)
-    ) {
-      fijarMotivo(pMotivo as any);
+
+    if (pMotivo) {
+      if (pMotivo === "falla_mecanica" || pMotivo === "falla_camion") {
+        fijarMotivo("falla_camion");
+        if (!pTitulo) fijarTitulo("Aviso de Retraso en Cuadrilla de Recolección");
+        if (!pMensaje) {
+          fijarMensaje(
+            "La unidad de recolección en tu sector presenta un retraso técnico imprevisto. El equipo de soporte atiende la incidencia para reanudar el recorrido a la brevedad."
+          );
+        }
+      } else if (pMotivo === "calle_bloqueada" || pMotivo === "suspension_ruta") {
+        fijarMotivo("suspension_ruta");
+        if (!pTitulo) fijarTitulo("Suspensión Temporal de Ruta por Vía Obstruida");
+        if (!pMensaje) {
+          fijarMensaje(
+            "Debido a obras viales u obstrucciones imprevistas en la calle, la unidad no podrá transitar temporalmente por este tramo. Se informará cuando se despeje."
+          );
+        }
+      } else if (pMotivo === "unidad_llena" || pMotivo === "retraso" || pMotivo === "incidente_vial") {
+        fijarMotivo("retraso");
+        if (!pTitulo) fijarTitulo("Aviso de Retraso en Horario de Servicio");
+        if (!pMensaje) {
+          fijarMensaje(
+            "La cuadrilla de recolección presenta un breve desfase en el itinerario regular de recolección. Agradecemos su comprensión y paciencia."
+          );
+        }
+      } else if (pMotivo === "dia_festivo") {
+        fijarMotivo("dia_festivo");
+        if (!pTitulo) fijarTitulo("Aviso: Suspensión de Servicio por Día Festivo");
+        if (!pMensaje) {
+          fijarMensaje(
+            "Estimado ciudadano, con motivo del día festivo oficial, el servicio de recolección de residuos se suspenderá hoy. Se reanudará el próximo día hábil."
+          );
+        }
+      } else if (
+        ["dia_festivo", "suspension_ruta", "falla_camion", "retraso", "aviso_general"].includes(pMotivo)
+      ) {
+        fijarMotivo(pMotivo as any);
+      }
     }
+
     if (pRutaId) {
       fijarAlcance("ruta_especifica");
       fijarRutaId(pRutaId);

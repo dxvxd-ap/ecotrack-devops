@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import Skeleton from "react-loading-skeleton";
 import {
@@ -20,544 +20,688 @@ import {
   X,
   FileText,
   UserCheck,
-  Radio,
   Phone,
+  Mail,
+  RefreshCw,
+  Eye,
+  Check,
 } from "lucide-react";
 
-interface Reporte {
+interface ItemIncidencia {
   _id: string;
+  folio?: string;
   origen: "ciudadano" | "conductor";
   tipo: string;
-  titulo: string;
+  titulo?: string;
   descripcion: string;
-  rutaId?: {
-    _id: string;
-    nombre: string;
-    id_ruta: string;
-    color_mapa?: string;
-  } | null;
-  camionId?: {
-    _id: string;
-    numero_unidad: string;
-    modelo: string;
-    matricula: string;
-    estado: string;
-  } | null;
+  ciudadano_nombre?: string;
+  ciudadano_telefono?: string;
+  ciudadano_email?: string;
+  domicilio_referencia?: string;
+  fotografia_url?: string;
+  rutaId?: any;
+  ruta_id?: string | null;
+  camionId?: any;
+  camion_asignado_id?: any;
   ubicacion: {
     lat: number;
     lng: number;
     direccion?: string;
   };
-  prioridad: "baja" | "media" | "alta" | "critica";
-  estado: "pendiente" | "en_proceso" | "resuelto";
+  prioridad?: "baja" | "media" | "alta" | "critica";
+  estado: string; // PENDIENTE | EN_REVISION | ATENDIDO | RECHAZADO | pendiente | en_proceso | resuelto
+  solucion_notas?: string;
+  notasAdmin?: string;
   reportadoPor?: {
     nombre?: string;
     contacto?: string;
     usuarioId?: string;
   };
-  notasAdmin?: string;
+  fecha_reporte?: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
+}
+
+interface MetricasResumen {
+  ciudadanos: {
+    pendientes: number;
+    en_proceso: number;
+    resueltos: number;
+    hoy: number;
+    total: number;
+  };
+  conductores: {
+    pendientes: number;
+    en_proceso: number;
+    resueltos: number;
+    criticos: number;
+    hoy: number;
+    total: number;
+  };
+  global: {
+    pendientesTotal: number;
+    criticosOperativos: number;
+    actividadHoy: number;
+    totalHistorico: number;
+  };
 }
 
 export default function PaginaGestionReportes() {
-  const [reportes, fijarReportes] = useState<Reporte[]>([]);
+  // Pestaña principal: "ciudadanos" o "conductores"
+  const [pestanaActiva, fijarPestanaActiva] = useState<"ciudadanos" | "conductores">("ciudadanos");
+
+  // Listados de datos
+  const [reclamosCiudadanos, fijarReclamosCiudadanos] = useState<ItemIncidencia[]>([]);
+  const [reportesConductores, fijarReportesConductores] = useState<ItemIncidencia[]>([]);
+  const [metricas, fijarMetricas] = useState<MetricasResumen | null>(null);
+
   const [cargando, fijarCargando] = useState(true);
+  const [recargando, fijarRecargando] = useState(false);
 
   // Filtros
-  const [pestanaActiva, fijarPestanaActiva] = useState<"todos" | "conductores" | "ciudadanos">("todos");
   const [filtroEstado, fijarFiltroEstado] = useState<string>("todos");
   const [busqueda, fijarBusqueda] = useState<string>("");
 
   // Modal de resolución / gestión
-  const [reporteSeleccionado, fijarReporteSeleccionado] = useState<Reporte | null>(null);
-  const [nuevoEstado, fijarNuevoEstado] = useState<"pendiente" | "en_proceso" | "resuelto">("en_proceso");
+  const [itemSeleccionado, fijarItemSeleccionado] = useState<ItemIncidencia | null>(null);
+  const [nuevoEstado, fijarNuevoEstado] = useState<string>("en_proceso");
   const [notasResolucion, fijarNotasResolucion] = useState<string>("");
   const [guardando, fijarGuardando] = useState(false);
+  const [mensajeExito, fijarMensajeExito] = useState<string>("");
 
-  // Cargar reportes desde la API
-  const cargarReportes = async () => {
+  // Cargar datos en paralelo desde las colecciones correspondientes
+  const cargarTodo = useCallback(async (silencioso = false) => {
     try {
-      fijarCargando(true);
-      const res = await fetch("/api/reportes?limite=100");
-      const data = await res.json();
-      if (data.exito) {
-        fijarReportes(data.datos || []);
+      if (!silencioso) fijarCargando(true);
+      else fijarRecargando(true);
+
+      const [resReclamos, resReportes, resResumen] = await Promise.all([
+        fetch("/api/reclamos?limite=100", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false, datos: [] })),
+        fetch("/api/reportes?origen=conductor&limite=100", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false, datos: [] })),
+        fetch("/api/reportes/resumen", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false })),
+      ]);
+
+      if (resReclamos.exito) {
+        fijarReclamosCiudadanos(resReclamos.datos || []);
+      }
+      if (resReportes.exito) {
+        fijarReportesConductores(resReportes.datos || []);
+      }
+      if (resResumen.exito) {
+        fijarMetricas(resResumen.datos);
       }
     } catch (e) {
-      console.error("Error al cargar reportes:", e);
+      console.error("[Reportes] Error al cargar datos:", e);
     } finally {
       fijarCargando(false);
+      fijarRecargando(false);
     }
-  };
-
-  useEffect(() => {
-    cargarReportes();
   }, []);
 
-  // Métricas calculadas para las tarjetas superiores
-  const metricas = useMemo(() => {
-    const pendientes = reportes.filter((r) => r.estado === "pendiente").length;
-    const criticosConductores = reportes.filter(
-      (r) =>
-        r.origen === "conductor" &&
-        (r.prioridad === "critica" || r.prioridad === "alta") &&
-        r.estado !== "resuelto"
-    ).length;
+  useEffect(() => {
+    cargarTodo();
+  }, [cargarTodo]);
 
-    const hoyStr = new Date().toISOString().split("T")[0];
-    const ciudadanosHoy = reportes.filter(
-      (r) => r.origen === "ciudadano" && r.createdAt.startsWith(hoyStr)
-    ).length;
+  // Lista activa según la pestaña
+  const itemsActivos = useMemo(() => {
+    return pestanaActiva === "ciudadanos" ? reclamosCiudadanos : reportesConductores;
+  }, [pestanaActiva, reclamosCiudadanos, reportesConductores]);
 
-    return { pendientes, criticosConductores, ciudadanosHoy };
-  }, [reportes]);
+  // Normalizador de estado para filtrado y badges
+  const normalizarEstado = (estadoRaw?: string) => {
+    const s = String(estadoRaw || "").toUpperCase();
+    if (s === "PENDIENTE") return "pendiente";
+    if (s === "EN_REVISION" || s === "EN_PROCESO") return "en_proceso";
+    if (s === "ATENDIDO" || s === "RESUELTO") return "resuelto";
+    if (s === "RECHAZADO") return "rechazado";
+    return s.toLowerCase();
+  };
 
-  // Filtrado de la lista
-  const reportesFiltrados = useMemo(() => {
-    return reportes.filter((r) => {
-      // Filtro por pestaña de origen
-      if (pestanaActiva === "conductores" && r.origen !== "conductor") return false;
-      if (pestanaActiva === "ciudadanos" && r.origen !== "ciudadano") return false;
-
+  // Filtrado de la lista activa
+  const itemsFiltrados = useMemo(() => {
+    return itemsActivos.filter((item) => {
       // Filtro por estado
-      if (filtroEstado !== "todos" && r.estado !== filtroEstado) return false;
+      if (filtroEstado !== "todos") {
+        const estadoNorm = normalizarEstado(item.estado);
+        if (estadoNorm !== filtroEstado) return false;
+      }
 
       // Filtro por búsqueda textual
       if (busqueda.trim()) {
         const q = busqueda.toLowerCase();
-        const texto = `${r.titulo} ${r.descripcion} ${r.tipo} ${r.reportadoPor?.nombre || ""} ${
-          r.rutaId?.nombre || ""
-        } ${r.camionId?.numero_unidad || ""}`.toLowerCase();
+        const texto = `${item.folio || ""} ${item.titulo || ""} ${item.descripcion || ""} ${item.tipo || ""} ${
+          item.ciudadano_nombre || item.reportadoPor?.nombre || ""
+        } ${item.domicilio_referencia || ""} ${item.camionId?.numero_unidad || item.camion_asignado_id?.numero_unidad || ""}`.toLowerCase();
         if (!texto.includes(q)) return false;
       }
 
       return true;
     });
-  }, [reportes, pestanaActiva, filtroEstado, busqueda]);
+  }, [itemsActivos, filtroEstado, busqueda]);
 
   // Abrir modal de gestión
-  const abrirModalGestion = (reporte: Reporte) => {
-    fijarReporteSeleccionado(reporte);
-    fijarNuevoEstado(reporte.estado === "pendiente" ? "en_proceso" : reporte.estado);
-    fijarNotasResolucion(reporte.notasAdmin || "");
+  const abrirModalGestion = (item: ItemIncidencia) => {
+    fijarItemSeleccionado(item);
+    const est = normalizarEstado(item.estado);
+    fijarNuevoEstado(est === "pendiente" ? "en_proceso" : est);
+    fijarNotasResolucion(item.notasAdmin || item.solucion_notas || "");
   };
 
-  // Guardar cambios en el reporte
-  const guardarGestionReporte = async (e: React.FormEvent) => {
+  // Guardar cambios en el reporte o reclamo
+  const guardarGestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reporteSeleccionado) return;
+    if (!itemSeleccionado) return;
 
     try {
       fijarGuardando(true);
-      const res = await fetch(`/api/reportes/${reporteSeleccionado._id}`, {
+      fijarMensajeExito("");
+
+      const esCiudadano = itemSeleccionado.origen === "ciudadano";
+      const url = esCiudadano
+        ? `/api/reclamos/${itemSeleccionado._id}`
+        : `/api/reportes/${itemSeleccionado._id}`;
+
+      // Payload adaptado al modelo correspondiente
+      const payload = esCiudadano
+        ? {
+            estado: nuevoEstado === "resuelto" ? "ATENDIDO" : nuevoEstado === "en_proceso" ? "EN_REVISION" : "PENDIENTE",
+            solucion_notas: notasResolucion,
+          }
+        : {
+            estado: nuevoEstado,
+            notasAdmin: notasResolucion,
+          };
+
+      const res = await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          estado: nuevoEstado,
-          notasAdmin: notasResolucion,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (data.exito) {
-        fijarReporteSeleccionado(null);
-        await cargarReportes();
+        fijarMensajeExito("¡Registro actualizado exitosamente!");
+        setTimeout(() => {
+          fijarItemSeleccionado(null);
+          fijarMensajeExito("");
+          cargarTodo(true);
+        }, 1200);
       } else {
-        alert(data.mensaje || "Error al actualizar el reporte.");
+        alert(data.mensaje || "Error al actualizar");
       }
-    } catch (e) {
-      alert("Error de red al actualizar reporte.");
+    } catch (err) {
+      alert("Error al comunicarse con el servidor.");
     } finally {
       fijarGuardando(false);
     }
   };
 
-  const formatearTipo = (tipo: string) => {
-    const mapaTipos: Record<string, string> = {
-      no_paso_camion: "No pasó el camión",
-      retraso: "Retraso en recolección",
-      basura_acumulada: "Basura acumulada en esquina",
-      falla_mecanica: "Falla mecánica de unidad",
-      incidente_vial: "Incidente vial / Choque",
-      calle_bloqueada: "Calle cerrada u obstruida",
-      unidad_llena: "Capacidad de tolva al 100%",
-      otro: "Otro incidente",
-    };
-    return mapaTipos[tipo] || tipo.replace(/_/g, " ");
+  // Traducción amigable de tipo de incidencia
+  const obtenerEtiquetaTipo = (tipo: string, origen: "ciudadano" | "conductor") => {
+    if (origen === "ciudadano") {
+      switch (tipo.toUpperCase()) {
+        case "CAMION_NO_PASO":
+          return { texto: "El camión no pasó", color: "bg-rose-500/20 text-rose-300 border-rose-500/30" };
+        case "HORARIO_IRREGULAR":
+          return { texto: "Horario irregular / Retraso", color: "bg-amber-500/20 text-amber-300 border-amber-500/30" };
+        case "BASURA_TIRADA":
+          return { texto: "Basura acumulada / tirada", color: "bg-orange-500/20 text-orange-300 border-orange-500/30" };
+        case "MALA_ATENCION":
+          return { texto: "Atención del personal", color: "bg-purple-500/20 text-purple-300 border-purple-500/30" };
+        default:
+          return { texto: tipo, color: "bg-zinc-800 text-zinc-300 border-zinc-700" };
+      }
+    } else {
+      switch (tipo.toLowerCase()) {
+        case "falla_mecanica":
+          return { texto: "Falla mecánica", color: "bg-rose-600/30 text-rose-300 border-rose-500/40" };
+        case "calle_bloqueada":
+          return { texto: "Calle bloqueada / Obstrucción", color: "bg-amber-500/20 text-amber-300 border-amber-500/30" };
+        case "unidad_llena":
+          return { texto: "Tolva llena (100%)", color: "bg-orange-500/20 text-orange-300 border-orange-500/30" };
+        case "incidente_vial":
+          return { texto: "Incidente vial / Tráfico", color: "bg-red-500/20 text-red-300 border-red-500/30" };
+        default:
+          return { texto: tipo, color: "bg-zinc-800 text-zinc-300 border-zinc-700" };
+      }
+    }
   };
 
   return (
     <div className="p-8 space-y-8 font-sans">
-      {/* Encabezado */}
+      {/* Encabezado Principal */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800 pb-6">
         <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-rose-400 mb-1">
-            <AlertOctagon className="w-3.5 h-3.5 animate-pulse" />
-            <span>MÓDULO DE ATENCIÓN OPERATIVA // INCIDENCIAS Y CIUDADANÍA</span>
+          <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 mb-1">
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>CENTRO DE CONTROL // INCIDENCIAS Y ATENCIÓN CIUDADANA</span>
           </div>
           <h1 className="texto-anton text-3xl tracking-wide text-white">
-            GESTIÓN DE REPORTES E INCIDENTES
+            GESTIÓN DE REPORTES Y RECLAMOS
           </h1>
           <p className="text-xs text-zinc-400 font-sans mt-0.5">
-            Supervisión y resolución de fallas reportadas por conductores y reportes vecinales en tiempo real.
+            Monitoreo en tiempo real de reclamos vecinales y reportes operativos emitidos desde las unidades.
           </p>
         </div>
 
-        <button
-          onClick={cargarReportes}
-          className="inline-flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono rounded-lg border border-zinc-700 transition-colors self-start md:self-auto"
-        >
-          <Radio className="w-3.5 h-3.5 text-blue-400" />
-          <span>Actualizar Lista</span>
-        </button>
-      </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => cargarTodo(true)}
+            disabled={recargando}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-mono bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${recargando ? "animate-spin text-blue-400" : ""}`} />
+            <span>Actualizar</span>
+          </button>
 
-      {/* Tarjetas de Resumen Superior */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Métrica 1: Pendientes */}
-        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[11px] font-mono uppercase tracking-wider">
-              REPORTES PENDIENTES
-            </span>
-            <Clock className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="texto-anton text-3xl text-white flex items-center">
-            {cargando ? (
-              <Skeleton width={60} height={32} containerClassName="flex-1" />
-            ) : (
-              <span className={metricas.pendientes > 0 ? "text-amber-400" : "text-white"}>
-                {metricas.pendientes}
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-zinc-500 font-mono">
-            Requieren atención o asignación
-          </p>
-        </div>
-
-        {/* Métrica 2: Críticos Conductores */}
-        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[11px] font-mono uppercase tracking-wider">
-              INCIDENTES CRÍTICOS EN FLOTA
-            </span>
-            <AlertTriangle className="w-4 h-4 text-rose-500" />
-          </div>
-          <div className="texto-anton text-3xl text-white flex items-center">
-            {cargando ? (
-              <Skeleton width={60} height={32} containerClassName="flex-1" />
-            ) : (
-              <span className={metricas.criticosConductores > 0 ? "text-rose-400" : "text-white"}>
-                {metricas.criticosConductores}
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-zinc-500 font-mono">
-            Fallas mecánicas o vías bloqueadas
-          </p>
-        </div>
-
-        {/* Métrica 3: Ciudadanos Hoy */}
-        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2">
-          <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-[11px] font-mono uppercase tracking-wider">
-              AVISOS CIUDADANOS (HOY)
-            </span>
-            <Users className="w-4 h-4 text-blue-400" />
-          </div>
-          <div className="texto-anton text-3xl text-white flex items-center">
-            {cargando ? (
-              <Skeleton width={60} height={32} containerClassName="flex-1" />
-            ) : (
-              metricas.ciudadanosHoy
-            )}
-          </div>
-          <p className="text-[11px] text-zinc-500 font-mono">
-            Reportes generados desde la app móvil
-          </p>
+          <Link
+            href="/dashboard/alertas"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-md"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Emitir Alerta Push</span>
+          </Link>
         </div>
       </div>
 
-      {/* Barra de Filtros y Búsqueda */}
-      <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-wrap items-center justify-between gap-4">
-        {/* Pestañas de Origen */}
-        <div className="flex items-center p-1 bg-zinc-800/80 rounded-xl border border-zinc-700/60 text-xs font-mono">
-          <button
-            onClick={() => fijarPestanaActiva("todos")}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
-              pestanaActiva === "todos"
-                ? "bg-zinc-700 text-white font-bold shadow-sm"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            Todos ({reportes.length})
-          </button>
-          <button
-            onClick={() => fijarPestanaActiva("conductores")}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              pestanaActiva === "conductores"
-                ? "bg-amber-600/90 text-white font-bold shadow-sm"
-                : "text-zinc-400 hover:text-amber-400"
-            }`}
-          >
-            <Truck className="w-3.5 h-3.5" />
-            <span>Conductores ({reportes.filter((r) => r.origen === "conductor").length})</span>
-          </button>
-          <button
-            onClick={() => fijarPestanaActiva("ciudadanos")}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              pestanaActiva === "ciudadanos"
-                ? "bg-blue-600/90 text-white font-bold shadow-sm"
-                : "text-zinc-400 hover:text-blue-400"
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Ciudadanos ({reportes.filter((r) => r.origen === "ciudadano").length})</span>
-          </button>
+      {/* Tarjetas Superiores de Métricas */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Tarjeta 1: Reclamos Ciudadanos Pendientes */}
+        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
+              Reclamos Ciudadanos
+            </span>
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <Users className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            {cargando ? (
+              <Skeleton width={60} height={32} />
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold font-mono text-white">
+                  {metricas?.ciudadanos.pendientes ?? 0}
+                </span>
+                <span className="text-xs text-amber-400 font-mono">pendientes</span>
+              </div>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-1 font-mono">
+              Total histórico: {metricas?.ciudadanos.total ?? reclamosCiudadanos.length}
+            </p>
+          </div>
         </div>
 
-        {/* Filtro de Estado y Caja de Búsqueda */}
-        <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+        {/* Tarjeta 2: Incidentes Críticos de Conductores */}
+        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
+              Incidentes Críticos Cabina
+            </span>
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <AlertOctagon className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            {cargando ? (
+              <Skeleton width={60} height={32} />
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold font-mono text-rose-400">
+                  {metricas?.conductores.criticos ?? 0}
+                </span>
+                <span className="text-xs text-rose-300 font-mono">alta / crítica</span>
+              </div>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-1 font-mono">
+              Fallas mecánicas o calles bloqueadas
+            </p>
+          </div>
+        </div>
+
+        {/* Tarjeta 3: Actividad de Hoy */}
+        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
+              Incidencias Hoy
+            </span>
+            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            {cargando ? (
+              <Skeleton width={60} height={32} />
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold font-mono text-white">
+                  {metricas?.global.actividadHoy ?? 0}
+                </span>
+                <span className="text-xs text-blue-400 font-mono">registradas</span>
+              </div>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-1 font-mono">
+              Vecinos: {metricas?.ciudadanos.hoy ?? 0} · Choferes: {metricas?.conductores.hoy ?? 0}
+            </p>
+          </div>
+        </div>
+
+        {/* Tarjeta 4: Resueltos / Atendidos */}
+        <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
+              Tasa de Resolución
+            </span>
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            {cargando ? (
+              <Skeleton width={60} height={32} />
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold font-mono text-emerald-400">
+                  {(metricas?.ciudadanos.resueltos ?? 0) + (metricas?.conductores.resueltos ?? 0)}
+                </span>
+                <span className="text-xs text-emerald-300 font-mono">atendidos</span>
+              </div>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-1 font-mono">
+              Atención municipal efectiva
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Pestañas Principales y Barra de Filtros */}
+      <div className="space-y-4">
+        {/* Selector de Pestañas con Contadores */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-2">
           <div className="flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-zinc-400" />
-            <select
-              value={filtroEstado}
-              onChange={(e) => fijarFiltroEstado(e.target.value)}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-blue-500"
+            <button
+              type="button"
+              onClick={() => {
+                fijarPestanaActiva("ciudadanos");
+                fijarFiltroEstado("todos");
+              }}
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-mono font-semibold transition-all ${
+                pestanaActiva === "ciudadanos"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/20 border border-blue-500"
+                  : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white hover:bg-zinc-800"
+              }`}
             >
-              <option value="todos">Todos los estados</option>
-              <option value="pendiente">Pendiente</option>
-              <option value="en_proceso">En proceso</option>
-              <option value="resuelto">Resuelto</option>
-            </select>
+              <Users className="w-4 h-4" />
+              <span>Reclamos Ciudadanos</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                  pestanaActiva === "ciudadanos"
+                    ? "bg-blue-800 text-blue-100"
+                    : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {reclamosCiudadanos.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                fijarPestanaActiva("conductores");
+                fijarFiltroEstado("todos");
+              }}
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-mono font-semibold transition-all ${
+                pestanaActiva === "conductores"
+                  ? "bg-amber-600 text-white shadow-md shadow-amber-600/20 border border-amber-500"
+                  : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white hover:bg-zinc-800"
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              <span>Reportes de Conductores / Operativos</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                  pestanaActiva === "conductores"
+                    ? "bg-amber-800 text-amber-100"
+                    : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {reportesConductores.length}
+              </span>
+            </button>
           </div>
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={busqueda}
-              onChange={(e) => fijarBusqueda(e.target.value)}
-              placeholder="Buscar por título, ruta..."
-              className="bg-zinc-800 border border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500"
-            />
+          {/* Filtro de Estado Rápido */}
+          <div className="flex items-center gap-1.5 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-mono">
+            {[
+              { id: "todos", etiqueta: "Todos" },
+              { id: "pendiente", etiqueta: "Pendientes" },
+              { id: "en_proceso", etiqueta: "En proceso" },
+              { id: "resuelto", etiqueta: "Resueltos" },
+            ].map((op) => (
+              <button
+                key={op.id}
+                type="button"
+                onClick={() => fijarFiltroEstado(op.id)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] transition-colors ${
+                  filtroEstado === op.id
+                    ? "bg-zinc-800 text-white font-bold shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                {op.etiqueta}
+              </button>
+            ))}
           </div>
+        </div>
+
+        {/* Buscador */}
+        <div className="relative">
+          <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={busqueda}
+            onChange={(e) => fijarBusqueda(e.target.value)}
+            placeholder={`Buscar por folio, ${
+              pestanaActiva === "ciudadanos" ? "nombre del vecino, domicilio o descripción" : "unidad de camión, falla o descripción"
+            }...`}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 font-sans focus:outline-none focus:border-blue-500 transition-colors"
+          />
         </div>
       </div>
 
-      {/* Lista de Reportes */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="texto-anton text-lg tracking-wide text-white flex items-center gap-2">
-            <FileText className="w-4 h-4 text-blue-400" />
-            <span>REPORTES REGISTRADOS ({reportesFiltrados.length})</span>
-          </h2>
-        </div>
-
+      {/* Lista Principal de Registros */}
+      <div className="space-y-3">
         {cargando ? (
           <div className="space-y-3">
             {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="p-5 bg-zinc-800/60 border border-zinc-700/60 rounded-xl space-y-3 text-xs"
-              >
+              <div key={i} className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <Skeleton width={120} height={18} borderRadius={6} />
-                  <Skeleton width={80} height={18} borderRadius={6} />
+                  <div className="flex items-center gap-3 flex-1">
+                    <Skeleton width={90} height={20} borderRadius={6} />
+                    <Skeleton width={180} height={20} borderRadius={6} containerClassName="flex-1" />
+                  </div>
+                  <Skeleton width={80} height={24} borderRadius={8} />
                 </div>
-                <Skeleton width="50%" height={16} />
-                <Skeleton width="85%" height={12} />
-                <div className="pt-2 border-t border-zinc-700/40 flex justify-between">
-                  <Skeleton width={100} height={12} />
-                  <Skeleton width={90} height={24} borderRadius={6} />
+                <Skeleton width="90%" height={14} />
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60">
+                  <Skeleton width={120} height={12} />
+                  <Skeleton width={140} height={28} borderRadius={8} />
                 </div>
               </div>
             ))}
           </div>
-        ) : reportesFiltrados.length === 0 ? (
-          <div className="py-12 text-center text-zinc-500 text-xs font-mono border border-dashed border-zinc-800 rounded-xl space-y-1">
-            <p>No se encontraron reportes con los filtros seleccionados.</p>
-            <p className="text-[11px] text-zinc-600">
-              Los nuevos reportes de conductores o ciudadanos aparecerán aquí automáticamente.
+        ) : itemsFiltrados.length === 0 ? (
+          <div className="py-16 text-center bg-zinc-900 border border-dashed border-zinc-800 rounded-2xl space-y-3">
+            <div className="w-12 h-12 rounded-full bg-zinc-800/60 text-zinc-500 flex items-center justify-center mx-auto">
+              <FileText className="w-6 h-6" />
+            </div>
+            <p className="text-zinc-400 text-xs font-mono">
+              No se encontraron {pestanaActiva === "ciudadanos" ? "reclamos ciudadanos" : "reportes de conductores"} con los filtros actuales.
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {reportesFiltrados.map((rep) => {
-              const esConductor = rep.origen === "conductor";
-              const esCritico =
-                rep.prioridad === "critica" || (esConductor && rep.tipo === "falla_mecanica");
+          <div className="grid grid-cols-1 gap-3">
+            {itemsFiltrados.map((item) => {
+              const estadoNorm = normalizarEstado(item.estado);
+              const infoTipo = obtenerEtiquetaTipo(item.tipo, item.origen);
+              const coords = item.ubicacion;
 
               return (
                 <div
-                  key={rep._id}
-                  className={`p-5 rounded-xl border transition-all text-xs space-y-3.5 ${
-                    esCritico && rep.estado !== "resuelto"
-                      ? "bg-rose-950/20 border-rose-800/50 shadow-md"
-                      : esConductor
-                      ? "bg-amber-950/15 border-amber-800/40"
-                      : "bg-zinc-800/50 border-zinc-700/60"
-                  }`}
+                  key={item._id}
+                  className="p-5 bg-zinc-900 hover:bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700/80 rounded-2xl shadow-md transition-all space-y-3.5"
                 >
-                  {/* Encabezado de la Tarjeta */}
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      {/* Badge de Origen */}
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 border ${
-                          esConductor
-                            ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                            : "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                        }`}
-                      >
-                        {esConductor ? <Truck className="w-3 h-3" /> : <Users className="w-3 h-3" />}
-                        <span>{esConductor ? "CONDUCTOR" : "CIUDADANO"}</span>
+                  {/* Encabezado de la Fila */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {/* Folio */}
+                      <span className="px-2.5 py-1 rounded-md bg-zinc-800 text-white font-mono text-[11px] font-bold border border-zinc-700">
+                        {item.folio || `ID-${item._id.slice(-6).toUpperCase()}`}
                       </span>
 
-                      {/* Tipo de Reporte */}
-                      <span className="font-mono text-zinc-300 font-semibold text-[11px]">
-                        {formatearTipo(rep.tipo)}
+                      {/* Badge Tipo de Incidencia */}
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${infoTipo.color}`}>
+                        {infoTipo.texto}
                       </span>
 
-                      {/* Prioridad */}
-                      <span
-                        className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase border ${
-                          rep.prioridad === "critica"
-                            ? "bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse"
-                            : rep.prioridad === "alta"
-                            ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                            : rep.prioridad === "media"
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                            : "bg-zinc-700/20 text-zinc-400 border-zinc-700/40"
-                        }`}
-                      >
-                        {rep.prioridad}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {/* Estado */}
-                      <span
-                        className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase border ${
-                          rep.estado === "resuelto"
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                            : rep.estado === "en_proceso"
-                            ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                            : "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                        }`}
-                      >
-                        {rep.estado === "en_proceso" ? "En Proceso" : rep.estado}
-                      </span>
-
-                      <span className="text-[10px] font-mono text-zinc-500">
-                        {new Date(rep.createdAt).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Título y Descripción */}
-                  <div className="space-y-1">
-                    <h3 className="text-white text-sm font-semibold tracking-wide">
-                      {rep.titulo}
-                    </h3>
-                    <p className="text-zinc-300 text-xs leading-relaxed">
-                      {rep.descripcion}
-                    </p>
-                  </div>
-
-                  {/* Metadatos: Ruta, Camión, Ubicación y Reportante */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-zinc-700/40 text-[11px] font-mono text-zinc-400">
-                    {rep.rutaId ? (
-                      <div className="flex items-center gap-1.5 truncate">
+                      {/* Prioridad en caso de conductor */}
+                      {item.origen === "conductor" && item.prioridad && (
                         <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: rep.rutaId.color_mapa || "#2f63ff" }}
-                        />
-                        <span className="text-white font-semibold truncate">
-                          {rep.rutaId.nombre}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="text-zinc-500 italic">Sin ruta específica</div>
-                    )}
-
-                    {rep.camionId ? (
-                      <div className="flex items-center gap-1.5 text-zinc-300">
-                        <Truck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span>
-                          Unidad {rep.camionId.numero_unidad} ({rep.camionId.matricula})
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="text-zinc-500 italic">Sin camión asignado</div>
-                    )}
-
-                    {rep.ubicacion && (
-                      <div className="flex items-center gap-1.5 truncate">
-                        <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <a
-                          href={`https://www.google.com/maps?q=${rep.ubicacion.lat},${rep.ubicacion.lng}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-400 hover:underline flex items-center gap-1 truncate"
-                          title="Abrir ubicación en el mapa"
+                          className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase tracking-wider ${
+                            item.prioridad === "critica"
+                              ? "bg-rose-600 text-white animate-pulse"
+                              : item.prioridad === "alta"
+                              ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+                              : "bg-zinc-800 text-zinc-400"
+                          }`}
                         >
-                          <span>{rep.ubicacion.direccion || `${rep.ubicacion.lat.toFixed(4)}, ${rep.ubicacion.lng.toFixed(4)}`}</span>
-                          <ExternalLink className="w-3 h-3 shrink-0" />
-                        </a>
-                      </div>
-                    )}
-
-                    {rep.reportadoPor?.nombre && (
-                      <div className="flex items-center gap-1.5 text-zinc-300 truncate">
-                        <UserCheck className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                        <span className="truncate">
-                          {rep.reportadoPor.nombre}
-                          {rep.reportadoPor.contacto ? ` (${rep.reportadoPor.contacto})` : ""}
+                          Prioridad: {item.prioridad}
                         </span>
-                      </div>
+                      )}
+                    </div>
+
+                    {/* Estado Actual */}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase ${
+                          estadoNorm === "resuelto"
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                            : estadoNorm === "en_proceso"
+                            ? "bg-blue-500/10 text-blue-400 border border-blue-500/30"
+                            : "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                        }`}
+                      >
+                        ● {estadoNorm.replace("_", " ")}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Descripción y Contenido */}
+                  <div className="space-y-1">
+                    {item.titulo && item.titulo !== item.descripcion && (
+                      <h3 className="text-white text-sm font-semibold">{item.titulo}</h3>
+                    )}
+                    <p className="text-xs text-zinc-300 leading-relaxed font-sans">{item.descripcion}</p>
+                  </div>
+
+                  {/* Datos del Ciudadano / Datos del Conductor y Camión */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 p-3 bg-zinc-950/60 rounded-xl border border-zinc-800/80 text-[11px] font-mono">
+                    {item.origen === "ciudadano" ? (
+                      <>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span className="truncate">{item.ciudadano_nombre || "Ciudadano"}</span>
+                        </div>
+                        {item.ciudadano_telefono && (
+                          <div className="flex items-center gap-2 text-zinc-300">
+                            <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>{item.ciudadano_telefono}</span>
+                          </div>
+                        )}
+                        {item.domicilio_referencia && (
+                          <div className="flex items-center gap-2 text-zinc-300 col-span-full">
+                            <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">{item.domicilio_referencia}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Truck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>
+                            {item.camionId?.numero_unidad
+                              ? `Unidad ${item.camionId.numero_unidad} (${item.camionId.matricula || "S/M"})`
+                              : "Unidad operativa"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <UserCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>{item.reportadoPor?.nombre || "Conductor de turno"}</span>
+                        </div>
+                        {coords?.direccion && (
+                          <div className="flex items-center gap-2 text-zinc-300 col-span-full">
+                            <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">{coords.direccion}</span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
-                  {/* Nota de Resolución Administrativa (si existe) */}
-                  {rep.notasAdmin && (
-                    <div className="p-2.5 bg-zinc-900/80 rounded-lg border border-zinc-700/60 text-[11px] space-y-0.5">
-                      <span className="font-mono text-zinc-400 uppercase text-[9px] font-bold block">
-                        Nota de Seguimiento / Resolución:
-                      </span>
-                      <p className="text-zinc-200">{rep.notasAdmin}</p>
+                  {/* Notas de resolución existentes si las hay */}
+                  {(item.notasAdmin || item.solucion_notas) && (
+                    <div className="p-2.5 bg-blue-950/20 border border-blue-500/20 rounded-xl text-[11px] font-mono text-blue-200">
+                      <strong className="text-blue-300 font-semibold block mb-0.5">Seguimiento / Notas:</strong>
+                      <span>{item.notasAdmin || item.solucion_notas}</span>
                     </div>
                   )}
 
-                  {/* Barra de Acciones */}
-                  <div className="pt-2 border-t border-zinc-700/50 flex flex-wrap items-center justify-between gap-3">
-                    <button
-                      onClick={() => abrirModalGestion(rep)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-mono font-semibold transition-colors shadow-sm"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Gestionar Estado</span>
-                    </button>
+                  {/* Barra Inferior: Fecha y Acciones Rápidas */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/80 text-[11px] font-mono">
+                    <span className="text-zinc-500">
+                      Fecha: {new Date(item.fecha_reporte || item.createdAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" })}
+                    </span>
 
-                    {/* Atajo Inteligente para Conductores con Incidentes */}
-                    {(esConductor || rep.tipo === "falla_mecanica" || rep.tipo === "incidente_vial") && (
-                      <Link
-                        href={`/dashboard/alertas?motivo=${
-                          rep.tipo === "falla_mecanica" ? "falla_camion" : "retraso"
-                        }&rutaId=${rep.rutaId?._id || ""}&titulo=${encodeURIComponent(
-                          `Aviso en ruta ${rep.rutaId?.nombre || ""}: ${rep.titulo}`
-                        )}&mensaje=${encodeURIComponent(
-                          `Se informa a los ciudadanos de este sector que la unidad presenta un retraso debido a: ${rep.descripcion}. Nuestro equipo ya trabaja para atender la recolección.`
-                        )}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 rounded-lg text-xs font-mono font-semibold border border-amber-500/30 transition-colors"
-                        title="Crear y precargar una notificación push para los ciudadanos de esta ruta"
+                    <div className="flex items-center gap-2">
+                      {/* Enlace al mapa de coordenadas */}
+                      {coords?.lat && coords?.lng && (
+                        <a
+                          href={`https://www.google.com/maps?q=${coords.lat},${coords.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors border border-zinc-700"
+                          title="Ver ubicación GPS en Google Maps"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Ver en mapa</span>
+                        </a>
+                      )}
+
+                      {/* Atajo Inteligente para Conductores: Alerta Push rápida */}
+                      {item.origen === "conductor" && (
+                        <Link
+                          href={`/dashboard/alertas?motivo=${item.tipo}&rutaId=${item.rutaId?._id || item.rutaId || ""}`}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white font-semibold transition-colors shadow-sm"
+                          title="Enviar alerta push inmediata a los vecinos de esta ruta"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>Alertar a ciudadanos</span>
+                        </Link>
+                      )}
+
+                      {/* Botón Gestionar / Cambiar Estado */}
+                      <button
+                        type="button"
+                        onClick={() => abrirModalGestion(item)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors shadow-sm"
                       >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Enviar Alerta a Ciudadanos de Esta Ruta ↗</span>
-                      </Link>
-                    )}
+                        <MessageSquare className="w-3 h-3" />
+                        <span>Gestionar</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -566,84 +710,81 @@ export default function PaginaGestionReportes() {
         )}
       </div>
 
-      {/* Modal de Gestión de Estado y Resolución */}
-      {reporteSeleccionado && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      {/* Modal de Resolución / Gestión */}
+      {itemSeleccionado && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
-                <h3 className="texto-anton text-xl tracking-wide text-white">
-                  GESTIONAR REPORTE // RESOLUCIÓN
+                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
+                  Gestión de {itemSeleccionado.origen === "ciudadano" ? "Reclamo Ciudadano" : "Reporte de Conductor"}
+                </span>
+                <h3 className="texto-anton text-lg tracking-wide text-white mt-0.5">
+                  FOLIO: {itemSeleccionado.folio || itemSeleccionado._id}
                 </h3>
-                <p className="text-[11px] font-mono text-zinc-400">
-                  ID: {reporteSeleccionado._id}
-                </p>
               </div>
               <button
-                onClick={() => fijarReporteSeleccionado(null)}
-                className="text-zinc-400 hover:text-white p-1"
+                type="button"
+                onClick={() => fijarItemSeleccionado(null)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={guardarGestionReporte} className="space-y-4 text-xs font-sans">
-              <div className="p-3 bg-zinc-800/60 rounded-xl border border-zinc-700/50 space-y-1">
-                <span className="font-semibold text-white block">
-                  {reporteSeleccionado.titulo}
-                </span>
-                <p className="text-zinc-300 text-[11px]">
-                  {reporteSeleccionado.descripcion}
-                </p>
+            {mensajeExito ? (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-mono flex items-center gap-2">
+                <Check className="w-4 h-4" />
+                <span>{mensajeExito}</span>
               </div>
+            ) : (
+              <form onSubmit={guardarGestion} className="space-y-4 text-xs font-sans">
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">CAMBIAR ESTADO</label>
+                  <select
+                    value={nuevoEstado}
+                    onChange={(e) => fijarNuevoEstado(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white font-mono focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="pendiente">Pendiente (Por atender)</option>
+                    <option value="en_proceso">En proceso / En revisión</option>
+                    <option value="resuelto">Resuelto / Atendido</option>
+                  </select>
+                </div>
 
-              <div>
-                <label className="block text-zinc-400 font-mono mb-1">
-                  ESTADO DEL REPORTE
-                </label>
-                <select
-                  value={nuevoEstado}
-                  onChange={(e) =>
-                    fijarNuevoEstado(e.target.value as "pendiente" | "en_proceso" | "resuelto")
-                  }
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-blue-500 font-mono"
-                >
-                  <option value="pendiente">Pendiente (Sin iniciar)</option>
-                  <option value="en_proceso">En Proceso (Cuadrilla o soporte asignado)</option>
-                  <option value="resuelto">Resuelto (Atendido y finalizado)</option>
-                </select>
-              </div>
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">
+                    NOTAS DE RESOLUCIÓN O SEGUIMIENTO
+                  </label>
+                  <textarea
+                    value={notasResolucion}
+                    onChange={(e) => fijarNotasResolucion(e.target.value)}
+                    placeholder="Escribe las acciones realizadas, respuesta al ciudadano o seguimiento del camión..."
+                    rows={4}
+                    required
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-zinc-400 font-mono mb-1">
-                  NOTAS DE RESOLUCIÓN O SEGUIMIENTO
-                </label>
-                <textarea
-                  value={notasResolucion}
-                  onChange={(e) => fijarNotasResolucion(e.target.value)}
-                  rows={3}
-                  placeholder="Ej: Se envió unidad de apoyo para concluir el tramo restante. Taller mecánico informó cambio de refacción..."
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => fijarReporteSeleccionado(null)}
-                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-mono text-xs"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={guardando}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-mono text-xs font-semibold uppercase transition-colors"
-                >
-                  {guardando ? "Guardando..." : "Guardar Resolución"}
-                </button>
-              </div>
-            </form>
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => fijarItemSeleccionado(null)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-mono text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={guardando}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-mono font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shadow-md"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{guardando ? "Guardando..." : "Guardar Cambios"}</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
