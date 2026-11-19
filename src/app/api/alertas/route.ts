@@ -28,24 +28,48 @@ export async function GET(peticion: NextRequest) {
         motivo
       )
     ) {
-      filtro.motivo = motivo;
+      filtro.$or = [{ motivo }, { tipo: motivo }];
     }
 
     if (alcance && ["todas_las_rutas", "ruta_especifica"].includes(alcance)) {
-      filtro.alcance = alcance;
+      if (alcance === "todas_las_rutas") {
+        filtro.$or = [{ alcance: "todas_las_rutas" }, { global: true }, { es_global: true }];
+      } else {
+        filtro.$or = [{ alcance: "ruta_especifica" }, { global: false }, { es_global: false }];
+      }
     }
 
     if (rutaId) {
-      filtro.rutaId = rutaId;
+      filtro.$or = [{ rutaId }, { ruta_id: rutaId }];
     }
 
-    let consulta: any = ModeloAlerta.find(filtro);
+    const alertasRaw = await ModeloAlerta.find(filtro)
+      .sort({ fecha_creacion: -1, createdAt: -1, _id: -1 })
+      .limit(limite)
+      .lean();
 
-    if (typeof consulta?.populate === "function") {
-      consulta = consulta.populate("rutaId", "nombre id_ruta color_mapa");
-    }
-
-    const alertas = await consulta.sort({ createdAt: -1 }).limit(limite);
+    // Normalizar alertas para compatibilidad bidireccional entre Dashboard y App Ciudadana
+    const alertas = alertasRaw.map((a: any) => ({
+      ...a,
+      _id: String(a._id),
+      titulo: a.titulo || a.title || "Alerta Municipal",
+      mensaje: a.mensaje || a.message || a.descripcion || "",
+      motivo: a.motivo || a.tipo || "aviso_general",
+      tipo: a.tipo || a.motivo || "aviso_general",
+      alcance: a.alcance || (a.global || a.es_global ? "todas_las_rutas" : "ruta_especifica"),
+      global: a.global ?? a.es_global ?? (a.alcance === "todas_las_rutas"),
+      es_global: a.es_global ?? a.global ?? (a.alcance === "todas_las_rutas"),
+      rutaId: a.rutaId || a.ruta_id || null,
+      ruta_id: a.ruta_id || a.rutaId || null,
+      fechaSuspension: a.fechaSuspension || null,
+      enviadosCount: a.enviadosCount ?? a.enviados_count ?? 0,
+      activo: a.activo ?? a.activa ?? true,
+      activa: a.activa ?? a.activo ?? true,
+      estado: a.estado || (a.activo === false || a.activa === false ? "inactiva" : "activa"),
+      createdAt: a.createdAt || a.fecha_creacion || new Date().toISOString(),
+      updatedAt: a.updatedAt || a.fecha_actualizacion || new Date().toISOString(),
+      fecha_creacion: a.fecha_creacion || a.createdAt || new Date().toISOString(),
+    }));
 
     return NextResponse.json({
       exito: true,
@@ -115,15 +139,27 @@ export async function POST(peticion: NextRequest) {
       );
     }
 
-    // 1. Guardar la alerta en MongoDB
+    const esGlobal = alcance === "todas_las_rutas";
+    const rutaIdFinal = esGlobal ? null : rutaId;
+
+    // 1. Guardar la alerta en MongoDB en la colección 'alertaciudadano' con compatibilidad total
     const nuevaAlerta = await ModeloAlerta.create({
       titulo: titulo.trim(),
       mensaje: mensaje.trim(),
       motivo,
+      tipo: motivo,
       alcance,
-      rutaId: alcance === "ruta_especifica" ? rutaId : null,
+      global: esGlobal,
+      es_global: esGlobal,
+      rutaId: rutaIdFinal,
+      ruta_id: rutaIdFinal,
       fechaSuspension: fechaSuspension ? new Date(fechaSuspension) : null,
       enviadosCount: 0,
+      activo: true,
+      activa: true,
+      estado: "activa",
+      fecha_creacion: new Date(),
+      fecha_actualizacion: new Date(),
     });
 
     // 2. Buscar tokens push destinatarios según el alcance
