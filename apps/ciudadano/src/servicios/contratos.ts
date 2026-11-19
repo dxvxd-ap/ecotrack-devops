@@ -60,6 +60,14 @@ export function normalizarVehiculo(dato: unknown, origen: Origen, ahora = Date.n
 function lineaValida(v: unknown): v is number[][] {
   return Array.isArray(v) && v.length >= 2 && v.every(p => Array.isArray(p) && numero(p[0], 180) && numero(p[1], 90));
 }
+function normalizarHorario(v: unknown): { horaInicio: string; horaFin: string } {
+  if (objeto(v)) {
+    const horaInicio = typeof v.horaInicio === 'string' ? v.horaInicio : typeof v.hora_inicio === 'string' ? v.hora_inicio : '07:00';
+    const horaFin = typeof v.horaFin === 'string' ? v.horaFin : typeof v.hora_fin === 'string' ? v.hora_fin : '13:00';
+    return { horaInicio, horaFin };
+  }
+  return { horaInicio: '07:00', horaFin: '13:00' };
+}
 export function normalizarRutas(respuesta: unknown): ColeccionRutas {
   if (!objeto(respuesta) || respuesta.exito !== true || !Array.isArray(respuesta.datos)) throw new Error('La API no devolvió un contrato de rutas válido.');
   const features: ColeccionRutas['features'] = [];
@@ -74,7 +82,7 @@ export function normalizarRutas(respuesta: unknown): ColeccionRutas {
       distanciaKm: typeof r.distancia_estimada_km === 'number' && Number.isFinite(r.distancia_estimada_km) && r.distancia_estimada_km > 0 ? r.distancia_estimada_km : null,
       duracionMin: typeof r.duracion_estimada_min === 'number' && Number.isFinite(r.duracion_estimada_min) && r.duracion_estimada_min > 0 ? r.duracion_estimada_min : null,
       diasRecoleccion: Array.isArray(r.diasRecoleccion) ? r.diasRecoleccion : Array.isArray(r.dias_recoleccion) ? r.dias_recoleccion : ['lunes', 'miercoles', 'viernes'],
-      horarioHabitual: r.horarioHabitual ?? r.horario_habitual ?? { horaInicio: '07:00', horaFin: '13:00' },
+      horarioHabitual: normalizarHorario(r.horarioHabitual ?? r.horario_habitual),
       camionAsignado: r.camionAsignadoId ?? r.camion_asignado_id ?? null,
     } });
   }

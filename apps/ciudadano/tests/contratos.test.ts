@@ -34,3 +34,14 @@ test('error de contrato no se disfraza de lista vacía; geometría inválida se 
   assert.throws(() => normalizarRutas({ exito: true }));
   assert.equal(normalizarRutas({ exito: true, datos: [{ trazado_geojson: { type: 'LineString', coordinates: [[-97,20],[999,20]] } }] }).features.length, 0);
 });
+test('normaliza horario habitual soportando camelCase, snake_case y fallback por defecto', () => {
+  const rutas = normalizarRutas({ exito: true, datos: [
+    { id_ruta: '1', trazado_geojson: { type: 'LineString', coordinates: [[-97,20],[-96,21]] }, horarioHabitual: { horaInicio: '08:00', horaFin: '14:00' } },
+    { id_ruta: '2', trazado_geojson: { type: 'LineString', coordinates: [[-97,20],[-96,21]] }, horario_habitual: { hora_inicio: '06:30', hora_fin: '12:30' } },
+    { id_ruta: '3', trazado_geojson: { type: 'LineString', coordinates: [[-97,20],[-96,21]] } }
+  ] });
+  assert.equal(rutas.features.length, 3);
+  assert.deepEqual(rutas.features[0].properties.horarioHabitual, { horaInicio: '08:00', horaFin: '14:00' });
+  assert.deepEqual(rutas.features[1].properties.horarioHabitual, { horaInicio: '06:30', horaFin: '12:30' });
+  assert.deepEqual(rutas.features[2].properties.horarioHabitual, { horaInicio: '07:00', horaFin: '13:00' });
+});
