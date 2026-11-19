@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import Skeleton from "react-loading-skeleton";
 import {
   Truck,
@@ -11,6 +12,7 @@ import {
   Navigation,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function PaginaGestionFlota() {
@@ -168,6 +170,17 @@ export default function PaginaGestionFlota() {
           <p className="text-xs text-zinc-400 font-sans mt-0.5">
             Administra vehículos recolectores, asignación unívoca de operador y telemetría satelital.
           </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Link
+            href="/conductor"
+            target="_blank"
+            className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span>Terminal Cabina / Reportar Incidente ↗</span>
+          </Link>
         </div>
       </div>
 

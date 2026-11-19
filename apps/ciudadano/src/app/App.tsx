@@ -8,6 +8,8 @@ import { posicionParaMapa } from '../servicios/posicion.ts';
 import { useDomicilioSesion } from './DomicilioSesion.tsx';
 import { Cuenta } from './Cuenta.tsx';
 import { ConsejosEcologicos } from './ConsejosEcologicos.tsx';
+import { ReportarProblema } from './ReportarProblema.tsx';
+import { inicializarNotificacionesPush } from '../servicios/push.ts';
 
 export type Tema = 'light' | 'dark' | 'auto';
 
@@ -48,6 +50,14 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
     window.addEventListener('online', change); window.addEventListener('offline', change);
     return () => { window.removeEventListener('online', change); window.removeEventListener('offline', change); };
   }, []);
+
+  // Inicialización de Notificaciones Push al iniciar la app
+  useEffect(() => {
+    if (!demo) {
+      const ids = rutas.features.map(r => r.properties.id);
+      void inicializarNotificacionesPush(ids);
+    }
+  }, [demo, rutas.features.length]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,7 +118,13 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
       </div>
     </div>
     <div hidden={tab !== 'cuenta'}>{cuentaMontada && <Cuenta configurada={clerkConfigurado} tema={tema} temaMapa={temaResuelto} />}</div>
-    {tab === 'reportes' && <section className="panel"><p className="eyebrow">REPORTES CIUDADANOS</p><h1>Hagamos una ciudad más limpia.</h1><p>En la siguiente entrega podrás registrar y consultar tus incidencias municipales. Esta pantalla todavía no envía reportes.</p><button className="primario" onClick={() => setTab('cuenta')}><ShieldCheck size={18}/>Revisar mi cuenta</button></section>}
+    {tab === 'reportes' && (
+      <ReportarProblema
+        rutas={rutas}
+        domicilioCoordenadas={domicilio?.ubicacion.coordinates ?? null}
+        onReporteExitoso={() => setTab('inicio')}
+      />
+    )}
     {error && <div className="aviso-flotante" role="alert"><p>{error}</p><button className="icono" aria-label="Cerrar aviso" onClick={() => setError(null)}><X size={18}/></button></div>}
     <nav className="navegacion isla" aria-label="Navegación principal">{tabs.map(({ id, texto, Icono }) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if (id === 'rutas') setExpandido(true); }}><Icono size={21}/><span>{texto}</span></button>)}</nav>
   </main>;

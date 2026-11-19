@@ -33,15 +33,17 @@ export default function PaginaResumenDashboard() {
     async function cargar_metricas() {
       try {
         fijar_cargando(true);
-        const [resp_rutas, resp_camiones, resp_cal] = await Promise.all([
-          fetch("/api/rutas").then((r) => r.json()),
-          fetch("/api/camiones").then((r) => r.json()),
-          fetch("/api/calendario").then((r) => r.json()),
+        const [resp_rutas, resp_camiones, resp_cal, resp_alertas] = await Promise.all([
+          fetch("/api/rutas").then((r) => r.json()).catch(() => ({ datos: [] })),
+          fetch("/api/camiones").then((r) => r.json()).catch(() => ({ datos: [] })),
+          fetch("/api/calendario").then((r) => r.json()).catch(() => ({ datos: [] })),
+          fetch("/api/alertas").then((r) => r.json()).catch(() => ({ datos: [] })),
         ]);
 
         const rutas = resp_rutas.datos || [];
         const camiones = resp_camiones.datos || [];
         const cal = resp_cal.datos || [];
+        const alertas = resp_alertas.datos || [];
 
         const en_ruta = camiones.filter((c: any) => c.estado === "en_ruta").length;
 
@@ -50,7 +52,7 @@ export default function PaginaResumenDashboard() {
           total_camiones: camiones.length,
           camiones_en_ruta: en_ruta,
           asignaciones_hoy: cal.length,
-          alertas_emitidas: 14,
+          alertas_emitidas: alertas.length,
         });
 
         fijar_asignaciones_recientes(cal.slice(0, 5));

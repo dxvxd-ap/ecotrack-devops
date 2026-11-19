@@ -13,7 +13,41 @@ import {
   ShieldCheck,
   Send,
   Navigation,
+  AlertTriangle,
+  X,
+  Truck,
+  Trash2,
+  HelpCircle,
 } from "lucide-react";
+
+const OPCIONES_PROBLEMA_CIUDADANO = [
+  {
+    id: "no_paso_camion",
+    etiqueta: "El camión no pasó",
+    descripcion: "Horario habitual concluido sin recolección en tu calle",
+    icono: Truck,
+  },
+  {
+    id: "retraso",
+    etiqueta: "Retraso en recolección",
+    descripcion: "La unidad presenta demora considerable en el recorrido",
+    icono: Clock,
+  },
+  {
+    id: "basura_acumulada",
+    etiqueta: "Basura acumulada",
+    descripcion: "Esquinas o contenedores saturados de desechos",
+    icono: Trash2,
+  },
+  {
+    id: "otro",
+    etiqueta: "Otro problema",
+    descripcion: "Bolsas desgarradas, desechos especiales u otro reporte",
+    icono: HelpCircle,
+  },
+] as const;
+
+type TipoProblemaCiudadano = typeof OPCIONES_PROBLEMA_CIUDADANO[number]["id"];
 
 export default function PaginaPortalCiudadano() {
   const [cargando, fijar_cargando] = useState(true);
@@ -21,6 +55,18 @@ export default function PaginaPortalCiudadano() {
   const [historial, fijar_historial] = useState<any[]>([]);
   const [guardando, fijar_guardando] = useState(false);
   const [mensaje_estado, fijar_mensaje_estado] = useState("");
+
+  // Reportar problema
+  const [modalReporteAbierto, setModalReporteAbierto] = useState(false);
+  const [tipoReporte, setTipoReporte] = useState<TipoProblemaCiudadano>("no_paso_camion");
+  const [tituloReporte, setTituloReporte] = useState("El camión no pasó por mi calle");
+  const [descripcionReporte, setDescripcionReporte] = useState("");
+  const [direccionReporte, setDireccionReporte] = useState("");
+  const [contactoReporte, setContactoReporte] = useState("");
+  const [coordsGPS, setCoordsGPS] = useState<{ lat: number; lng: number }>({ lat: 20.4514, lng: -97.0886 });
+  const [enviandoReporte, setEnviandoReporte] = useState(false);
+  const [reporteExito, setReporteExito] = useState(false);
+  const [errorReporte, setErrorReporte] = useState<string | null>(null);
 
   // Formulario de suscripción con ubicación en Gutiérrez Zamora, Veracruz
   const [formulario, fijar_formulario] = useState({
@@ -49,7 +95,116 @@ export default function PaginaPortalCiudadano() {
 
   useEffect(() => {
     cargar_datos();
+
+    // 1. Registro automático de token push en backend
+    async function registrarPushToken() {
+      try {
+        let token = localStorage.getItem("ecotrack_push_token");
+        if (!token) {
+          const rand = Math.random().toString(36).substring(2, 9);
+          token = `ExponentPushToken[ecotrack_web_${rand}_${Date.now()}]`;
+          localStorage.setItem("ecotrack_push_token", token);
+        }
+
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+          try {
+            await Notification.requestPermission();
+          } catch {}
+        }
+
+        await fetch("/api/notificaciones/registrar-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token,
+            plataforma: "web",
+            rutasSuscritas: [],
+            activo: true,
+          }),
+        });
+      } catch (e) {
+        console.warn("[Push] Error al registrar token web:", e);
+      }
+    }
+
+    registrarPushToken();
   }, []);
+
+  // Capturar GPS para reporte ciudadano
+  const capturarUbicacionCiudadano = () => {
+    if (typeof window !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setCoordsGPS({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        () => {
+          setCoordsGPS({ lat: 20.4514, lng: -97.0886 });
+        },
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    }
+  };
+
+  const abrirModalReporte = () => {
+    setModalReporteAbierto(true);
+    setReporteExito(false);
+    setErrorReporte(null);
+    capturarUbicacionCiudadano();
+  };
+
+  const alCambiarTipo = (tipo: TipoProblemaCiudadano) => {
+    setTipoReporte(tipo);
+    if (tipo === "no_paso_camion") setTituloReporte("El camión no pasó por mi calle");
+    else if (tipo === "retraso") setTituloReporte("Retraso en recolección");
+    else if (tipo === "basura_acumulada") setTituloReporte("Acumulación de basura en vía pública");
+    else setTituloReporte("Problema con servicio de recolección");
+  };
+
+  const enviarReporteCiudadano = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!descripcionReporte.trim()) {
+      setErrorReporte("Por favor describe brevemente el problema.");
+      return;
+    }
+
+    try {
+      setEnviandoReporte(true);
+      setErrorReporte(null);
+
+      const res = await fetch("/api/reportes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origen: "ciudadano",
+          tipo: tipoReporte,
+          titulo: tituloReporte,
+          descripcion: descripcionReporte.trim(),
+          prioridad: "media",
+          ubicacion: {
+            lat: coordsGPS.lat,
+            lng: coordsGPS.lng,
+            direccion: direccionReporte.trim() || undefined,
+          },
+          reportadoPor: {
+            contacto: contactoReporte.trim() || undefined,
+            nombre: "Ciudadano Web",
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.exito) {
+        throw new Error(data.mensaje || "Error al enviar reporte");
+      }
+
+      setReporteExito(true);
+      setDescripcionReporte("");
+    } catch (err: any) {
+      setErrorReporte(err.message || "Error al transmitir el reporte");
+    } finally {
+      setEnviandoReporte(false);
+    }
+  };
 
   const manejar_envio_formulario = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,10 +253,17 @@ export default function PaginaPortalCiudadano() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={abrirModalReporte}
+            className="px-3.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>REPORTAR PROBLEMA</span>
+          </button>
           <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            Suscripción Espacial Activa
+            Suscripción Activa
           </span>
           <UserButton />
         </div>
@@ -307,6 +469,145 @@ export default function PaginaPortalCiudadano() {
           </div>
         </div>
       </main>
+
+      {/* Modal Reportar Problema Ciudadano */}
+      {modalReporteAbierto && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-900/95 backdrop-blur z-10">
+              <div className="flex items-center gap-2 text-red-400 font-mono text-xs font-bold uppercase">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Reportar Problema en Tu Calle</span>
+              </div>
+              <button
+                onClick={() => setModalReporteAbierto(false)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {reporteExito ? (
+                <div className="text-center py-6 space-y-3">
+                  <div className="w-14 h-14 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <h4 className="texto-anton text-xl text-white">¡REPORTE ENVIADO!</h4>
+                  <p className="text-xs text-zinc-300 font-sans max-w-xs mx-auto">
+                    El equipo de Servicios Públicos y los encargados de ruta han recibido tu reporte.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setModalReporteAbierto(false);
+                      setReporteExito(false);
+                    }}
+                    className="mt-3 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-mono text-xs font-bold uppercase rounded-xl transition-colors"
+                  >
+                    Aceptar
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={enviarReporteCiudadano} className="space-y-4 text-xs font-sans">
+                  {/* Selector de 4 opciones */}
+                  <div className="space-y-1.5">
+                    <label className="block text-zinc-400 font-mono text-[11px] uppercase font-bold">
+                      ¿Qué problema deseas reportar?
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {OPCIONES_PROBLEMA_CIUDADANO.map((op) => {
+                        const Icono = op.icono;
+                        const esSel = tipoReporte === op.id;
+                        return (
+                          <button
+                            key={op.id}
+                            type="button"
+                            onClick={() => alCambiarTipo(op.id)}
+                            className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
+                              esSel
+                                ? "border-red-500 bg-red-500/10 ring-1 ring-red-500"
+                                : "border-zinc-800 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 font-bold text-white">
+                              <Icono className="w-4 h-4 text-red-400" />
+                              <span className="text-xs">{op.etiqueta}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-400 leading-tight">
+                              {op.descripcion}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 font-mono text-[11px] uppercase font-bold mb-1">
+                      Descripción del problema
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={descripcionReporte}
+                      onChange={(e) => setDescripcionReporte(e.target.value)}
+                      required
+                      placeholder="Indica qué sucedió y referencias de tu calle..."
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-red-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 font-mono text-[11px] uppercase font-bold mb-1">
+                      Dirección aproximada (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={direccionReporte}
+                      onChange={(e) => setDireccionReporte(e.target.value)}
+                      placeholder="Calle y colonia"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-red-500"
+                    />
+                  </div>
+
+                  <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-[11px] font-mono text-zinc-400 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>GPS actual:</span>
+                    </span>
+                    <span className="text-white font-bold">
+                      [{coordsGPS.lat.toFixed(4)}, {coordsGPS.lng.toFixed(4)}]
+                    </span>
+                  </div>
+
+                  {errorReporte && (
+                    <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono">
+                      {errorReporte}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setModalReporteAbierto(false)}
+                      className="w-1/3 py-2.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-mono text-xs uppercase font-bold transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={enviandoReporte}
+                      className="w-2/3 py-2.5 px-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-xl font-mono text-xs uppercase font-bold transition-all shadow-md flex items-center justify-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{enviandoReporte ? "Enviando..." : "Enviar Reporte"}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

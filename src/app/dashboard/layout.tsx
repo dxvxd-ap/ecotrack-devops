@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Shield,
   Layers,
+  AlertOctagon,
 } from "lucide-react";
 import { ProveedorTema } from "@/context/TemaContext";
 import { BotonTema } from "@/componentes/dashboard/BotonTema";
@@ -107,11 +108,19 @@ export default function DisenoDashboard({
             </div>
 
             <Link
+              href="/dashboard/reportes"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
+            >
+              <AlertOctagon className="w-4 h-4 text-rose-400" />
+              <span>Reportes e Incidentes</span>
+            </Link>
+
+            <Link
               href="/dashboard/alertas"
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
             >
               <Bell className="w-4 h-4 text-purple-400" />
-              <span>Alertas al Ciudadano</span>
+              <span>Alertas y Notificaciones</span>
             </Link>
 
             <Link
