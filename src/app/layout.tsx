@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { RecuperadorChunk } from "@/componentes/ui/RecuperadorChunk";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,6 +18,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="es" suppressHydrationWarning>
         <body className="antialiased min-h-screen w-full flex flex-col selection:bg-blue-600 selection:text-white">
+          <RecuperadorChunk />
           {children}
         </body>
       </html>

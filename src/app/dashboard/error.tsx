@@ -11,17 +11,44 @@ export default function ErrorDashboard({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Registro interno y seguro sin exponer stack traces al usuario final
+    const esChunk =
+      error.name === "ChunkLoadError" ||
+      error.message?.includes("Loading chunk") ||
+      error.message?.includes("ChunkLoadError");
+
+    if (esChunk) {
+      const yaRecargado = sessionStorage.getItem("chunk_reload_error_dashboard");
+      if (!yaRecargado) {
+        sessionStorage.setItem("chunk_reload_error_dashboard", "1");
+        window.location.reload();
+        return;
+      }
+    }
     console.error("[DashboardError] Excepción capturada en dashboard:", error);
   }, [error]);
+
+  const esErrorChunk =
+    error.name === "ChunkLoadError" ||
+    error.message?.includes("Loading chunk") ||
+    error.message?.includes("ChunkLoadError");
 
   return (
     <div className="py-12">
       <VistaError
         tipo="500"
-        tituloPersonalizado="Interrupción en el Panel de Control"
-        mensajePersonalizado="No pudimos cargar los datos operativos de esta sección. Intenta reintentar la acción o volver al resumen general."
-        alReintentar={reset}
+        tituloPersonalizado={esErrorChunk ? "Actualización del Panel Disponible" : "Interrupción en el Panel de Control"}
+        mensajePersonalizado={
+          esErrorChunk
+            ? "Se ha detectado una nueva versión del sistema en Vercel. Presiona 'Actualizar ahora' para recargar el panel de control."
+            : "No pudimos cargar los datos operativos de esta sección. Intenta reintentar la acción o volver al resumen general."
+        }
+        alReintentar={() => {
+          if (esErrorChunk) {
+            window.location.reload();
+          } else {
+            reset();
+          }
+        }}
         enlaceVolver="/dashboard"
         textoVolver="Volver al Resumen General"
       />
