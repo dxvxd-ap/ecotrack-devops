@@ -97,6 +97,7 @@ export default function PaginaGestionReportes() {
 
   const [cargando, fijarCargando] = useState(true);
   const [recargando, fijarRecargando] = useState(false);
+  const [errorCarga, fijarErrorCarga] = useState<string | null>(null);
 
   // Filtros
   const [filtroEstado, fijarFiltroEstado] = useState<string>("todos");
@@ -114,24 +115,36 @@ export default function PaginaGestionReportes() {
     try {
       if (!silencioso) fijarCargando(true);
       else fijarRecargando(true);
+      fijarErrorCarga(null);
 
       const [resReclamos, resReportes, resResumen] = await Promise.all([
-        fetch("/api/reclamos?limite=100", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false, datos: [] })),
-        fetch("/api/reportes?origen=conductor&limite=100", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false, datos: [] })),
-        fetch("/api/reportes/resumen", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ exito: false })),
+        fetch("/api/reclamos?limite=100", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
+          .then((r) => r.json())
+          .catch((err) => ({ exito: false, mensaje: err.message, datos: [] })),
+        fetch("/api/reportes?origen=conductor&limite=100", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
+          .then((r) => r.json())
+          .catch((err) => ({ exito: false, mensaje: err.message, datos: [] })),
+        fetch("/api/reportes/resumen", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
+          .then((r) => r.json())
+          .catch(() => ({ exito: false })),
       ]);
 
       if (resReclamos.exito) {
         fijarReclamosCiudadanos(resReclamos.datos || []);
+      } else if (resReclamos.mensaje) {
+        fijarErrorCarga(`Aviso en Reclamos: ${resReclamos.mensaje}`);
       }
+
       if (resReportes.exito) {
         fijarReportesConductores(resReportes.datos || []);
       }
+
       if (resResumen.exito) {
         fijarMetricas(resResumen.datos);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("[Reportes] Error al cargar datos:", e);
+      fijarErrorCarga("No se pudo conectar con el servidor de reportes.");
     } finally {
       fijarCargando(false);
       fijarRecargando(false);
@@ -304,6 +317,23 @@ export default function PaginaGestionReportes() {
           </Link>
         </div>
       </div>
+
+      {/* Alerta de error en carga si ocurriese */}
+      {errorCarga && (
+        <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-mono flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{errorCarga}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fijarErrorCarga(null)}
+            className="text-zinc-400 hover:text-white p-1 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Tarjetas Superiores de Métricas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
-import { autorizar_reclamos, ErrorAdministrativo } from "@/lib/autorizacion";
+import { identidad_autenticada, estado_cuenta, ErrorAdministrativo } from "@/lib/autorizacion";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,8 @@ export const revalidate = 0;
  */
 export async function GET(peticion: NextRequest) {
   try {
-    const actor = await autorizar_reclamos();
+    const usuario = await identidad_autenticada();
+    await estado_cuenta(usuario);
     await conectar_base_datos();
 
     const { searchParams } = new URL(peticion.url);
@@ -22,12 +23,13 @@ export async function GET(peticion: NextRequest) {
     const tipo = searchParams.get("tipo");
     const busqueda = searchParams.get("busqueda");
     const limite = Math.min(200, Math.max(1, Number(searchParams.get("limite")) || 50));
+    const soloPropios = searchParams.get("solo_propios") === "true";
 
     const filtro: Record<string, any> = {};
 
-    // Si es ciudadano común, solo puede ver los suyos
-    if (actor.rol === "ciudadano") {
-      filtro.ciudadano_id_clerk = actor.usuario.id;
+    // Si se solicita explícitamente filtrar por el usuario autenticado (ej. vista ciudadana)
+    if (soloPropios) {
+      filtro.ciudadano_id_clerk = usuario.id;
     }
 
     if (estado && estado !== "todos") {

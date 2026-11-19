@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
 import { ModeloReporte } from "@/modelos/Reporte";
-import { autorizar_administracion } from "@/lib/autorizacion";
+import { identidad_autenticada, estado_cuenta } from "@/lib/autorizacion";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,8 @@ export const revalidate = 0;
  */
 export async function GET() {
   try {
-    await autorizar_administracion("rutas:gestionar");
+    const usuario = await identidad_autenticada();
+    await estado_cuenta(usuario);
     await conectar_base_datos();
 
     const inicioHoy = new Date();
