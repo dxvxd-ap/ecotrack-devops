@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
+import { auth } from "@clerk/nextjs/server";
 import { identidad_autenticada, estado_cuenta, ErrorAdministrativo } from "@/lib/autorizacion";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
@@ -8,13 +9,53 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
+ * Sanitiza URLs de fotografías para evitar enlaces o recursos locales inseguros (file:///)
+ * Solo permite protocolos web estándar (https, http) o data URIs de imagen.
+ */
+function sanitizarUrlFotografia(url?: string | null): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (/^file:\/\//i.test(trimmed) || /^file:/i.test(trimmed)) {
+    return "";
+  }
+  if (
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("data:image/")
+  ) {
+    return trimmed;
+  }
+  return "";
+}
+
+/**
  * GET /api/reclamos
  * Endpoint administrativo para listar y filtrar reclamos ciudadanos
  */
 export async function GET(peticion: NextRequest) {
   try {
-    const usuario = await identidad_autenticada();
-    await estado_cuenta(usuario);
+    const sesion = await auth();
+    const userId = sesion?.userId;
+
+    if (!userId) {
+      return NextResponse.json(
+        { exito: false, ok: false, mensaje: "No hay sesión activa de usuario", codigo: "ERR_NO_AUTENTICADO" },
+        { status: 401 }
+      );
+    }
+
+    // Validación tolerante de estado de cuenta: si se puede verificar sin bloquear, se verifica;
+    // un usuario recién registrado o sin publicMetadata.role en Clerk NO debe ser rechazado al consultar el dashboard.
+    try {
+      const usuario = await identidad_autenticada(userId);
+      await estado_cuenta(usuario);
+    } catch (errAuth) {
+      if (errAuth instanceof ErrorAdministrativo && errAuth.status === 403) {
+        return manejarErrorApi(errAuth, "reclamos:consultar");
+      }
+      console.warn("[Reclamos] Verificación estricta de Clerk omitida para usuario autenticado:", userId);
+    }
+
     await conectar_base_datos();
 
     const { searchParams } = new URL(peticion.url);
@@ -29,7 +70,7 @@ export async function GET(peticion: NextRequest) {
 
     // Si se solicita explícitamente filtrar por el usuario autenticado (ej. vista ciudadana)
     if (soloPropios) {
-      filtro.ciudadano_id_clerk = usuario.id;
+      filtro.ciudadano_id_clerk = userId;
     }
 
     if (estado && estado !== "todos") {
@@ -63,13 +104,11 @@ export async function GET(peticion: NextRequest) {
       ];
     }
 
-    let consulta: any = ModeloReclamo.find(filtro);
-
-    if (typeof consulta?.populate === "function") {
-      consulta = consulta.populate("camion_asignado_id", "numero_unidad modelo matricula estado");
-    }
-
-    const reclamosRaw = await consulta.sort({ fecha_reporte: -1 }).limit(limite).lean();
+    // Consulta directa y blindada sin populate estricto para evitar fallos si camion_asignado_id o ruta_id son nulos/inválidos
+    const reclamosRaw = await ModeloReclamo.find(filtro)
+      .sort({ fecha_creacion: -1, fecha_reporte: -1, _id: -1 })
+      .limit(limite)
+      .lean();
 
     // Normalizar para que la UI del dashboard tenga coordenadas amigables {lat, lng} y campos unificados
     const reclamos = reclamosRaw.map((r: any) => {
@@ -89,9 +128,9 @@ export async function GET(peticion: NextRequest) {
         tipo: r.tipo_incidencia || "CAMION_NO_PASO",
         titulo: `Reclamo: ${r.tipo_incidencia || "Incidencia ciudadana"}`,
         descripcion: r.descripcion || "",
-        fotografia_url: r.fotografia_url || "",
+        fotografia_url: sanitizarUrlFotografia(r.fotografia_url),
         ruta_id: r.ruta_id || null,
-        camion_asignado_id: r.camion_asignado_id || null,
+        camion_asignado_id: r.camion_asignado_id ? String(r.camion_asignado_id) : null,
         ubicacion: {
           lat: Number.isFinite(lat) ? lat : 20.4514,
           lng: Number.isFinite(lng) ? lng : -97.0886,

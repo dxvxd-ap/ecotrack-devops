@@ -6,11 +6,18 @@ import {
   PrioridadReporte,
   EstadoReporte,
 } from "@/modelos/Reporte";
+import { auth } from "@clerk/nextjs/server";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(peticion: NextRequest) {
   try {
     await conectar_base_datos();
+
+    // Verificación de sesión no bloqueante para tolerar usuarios en proceso de asignación de rol
+    const sesion = await auth().catch(() => null);
 
     const { searchParams } = new URL(peticion.url);
     const origen = searchParams.get("origen") as OrigenReporte | null;
@@ -42,15 +49,18 @@ export async function GET(peticion: NextRequest) {
       filtro.camionId = camionId;
     }
 
-    let consulta: any = ModeloReporte.find(filtro);
+    // Consulta directa y blindada sin populate estricto para evitar fallos si no existen esquemas o IDs inválidos
+    const reportesRaw = await ModeloReporte.find(filtro)
+      .sort({ fecha_creacion: -1, createdAt: -1, _id: -1 })
+      .limit(limite)
+      .lean();
 
-    if (typeof consulta?.populate === "function") {
-      consulta = consulta
-        .populate("rutaId", "nombre id_ruta color_mapa")
-        .populate("camionId", "numero_unidad modelo matricula estado");
-    }
-
-    const reportes = await consulta.sort({ createdAt: -1 }).limit(limite);
+    const reportes = reportesRaw.map((rep: any) => ({
+      ...rep,
+      _id: String(rep._id),
+      createdAt: rep.createdAt || rep.fecha_creacion || new Date().toISOString(),
+      updatedAt: rep.updatedAt || rep.fecha_actualizacion || new Date().toISOString(),
+    }));
 
     return NextResponse.json({
       exito: true,

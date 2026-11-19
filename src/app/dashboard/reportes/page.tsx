@@ -25,7 +25,25 @@ import {
   RefreshCw,
   Eye,
   Check,
+  Camera,
 } from "lucide-react";
+
+// Sanitiza URLs de fotografías para descartar protocolos locales inseguros como file:///
+function sanitizarUrlFotografia(url?: string | null): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (/^file:\/\//i.test(trimmed) || /^file:/i.test(trimmed)) {
+    return "";
+  }
+  if (
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("data:image/")
+  ) {
+    return trimmed;
+  }
+  return "";
+}
 
 interface ItemIncidencia {
   _id: string;
@@ -110,40 +128,74 @@ export default function PaginaGestionReportes() {
   const [guardando, fijarGuardando] = useState(false);
   const [mensajeExito, fijarMensajeExito] = useState<string>("");
 
-  // Cargar datos en paralelo desde las colecciones correspondientes
+  // Cargar datos en paralelo desde las colecciones con degradación independiente (Promise.allSettled)
   const cargarTodo = useCallback(async (silencioso = false) => {
     try {
       if (!silencioso) fijarCargando(true);
       else fijarRecargando(true);
       fijarErrorCarga(null);
 
-      const [resReclamos, resReportes, resResumen] = await Promise.all([
-        fetch("/api/reclamos?limite=100", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
-          .then((r) => r.json())
-          .catch((err) => ({ exito: false, mensaje: err.message, datos: [] })),
-        fetch("/api/reportes?origen=conductor&limite=100", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
-          .then((r) => r.json())
-          .catch((err) => ({ exito: false, mensaje: err.message, datos: [] })),
-        fetch("/api/reportes/resumen", { cache: "no-store", headers: { "Cache-Control": "no-cache" } })
-          .then((r) => r.json())
-          .catch(() => ({ exito: false })),
+      const [pReclamos, pReportes, pResumen] = await Promise.allSettled([
+        fetch("/api/reclamos?limite=100", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
+        }).then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.exito === false || data.ok === false) {
+            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
+          }
+          return data;
+        }),
+        fetch("/api/reportes?origen=conductor&limite=100", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
+        }).then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.exito === false || data.ok === false) {
+            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
+          }
+          return data;
+        }),
+        fetch("/api/reportes/resumen", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
+        }).then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.exito === false || data.ok === false) {
+            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
+          }
+          return data;
+        }),
       ]);
 
-      if (resReclamos.exito) {
-        fijarReclamosCiudadanos(resReclamos.datos || []);
-      } else if (resReclamos.mensaje) {
-        fijarErrorCarga(`Aviso en Reclamos: ${resReclamos.mensaje}`);
+      const avisos: string[] = [];
+
+      // Procesar Reclamos Ciudadanos independientemente
+      if (pReclamos.status === "fulfilled") {
+        fijarReclamosCiudadanos(pReclamos.value.datos || []);
+      } else {
+        console.warn("[Reportes] Error al obtener reclamos:", pReclamos.reason);
+        avisos.push(`Reclamos ciudadanos: ${pReclamos.reason?.message || "Servicio temporalmente inaccesible"}`);
       }
 
-      if (resReportes.exito) {
-        fijarReportesConductores(resReportes.datos || []);
+      // Procesar Reportes de Conductores independientemente
+      if (pReportes.status === "fulfilled") {
+        fijarReportesConductores(pReportes.value.datos || []);
+      } else {
+        console.warn("[Reportes] Error al obtener reportes:", pReportes.reason);
+        avisos.push(`Reportes operativos: ${pReportes.reason?.message || "Servicio temporalmente inaccesible"}`);
       }
 
-      if (resResumen.exito) {
-        fijarMetricas(resResumen.datos);
+      // Procesar Métricas de Resumen independientemente
+      if (pResumen.status === "fulfilled") {
+        fijarMetricas(pResumen.value.datos);
+      }
+
+      if (avisos.length > 0) {
+        fijarErrorCarga(`Aviso del sistema: ${avisos.join(" | ")}`);
       }
     } catch (e: any) {
-      console.error("[Reportes] Error al cargar datos:", e);
+      console.error("[Reportes] Error inesperado:", e);
       fijarErrorCarga("No se pudo conectar con el servidor de reportes.");
     } finally {
       fijarCargando(false);
@@ -695,7 +747,27 @@ export default function PaginaGestionReportes() {
                       Fecha: {new Date(item.fecha_reporte || item.createdAt).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" })}
                     </span>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Evidencia fotográfica sanitizada (descarta cualquier protocolo file://) */}
+                      {item.origen === "ciudadano" && (
+                        sanitizarUrlFotografia(item.fotografia_url) ? (
+                          <a
+                            href={sanitizarUrlFotografia(item.fotografia_url)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-blue-300 hover:text-white transition-colors border border-zinc-700"
+                            title="Ver fotografía adjunta"
+                          >
+                            <Camera className="w-3 h-3 text-blue-400" />
+                            <span>Ver foto</span>
+                          </a>
+                        ) : (
+                          <span className="text-[10px] text-zinc-500 font-mono italic px-1">
+                            Sin fotografía adjunta
+                          </span>
+                        )
+                      )}
+
                       {/* Enlace al mapa de coordenadas */}
                       {coords?.lat && coords?.lng && (
                         <a
@@ -769,6 +841,39 @@ export default function PaginaGestionReportes() {
               </div>
             ) : (
               <form onSubmit={guardarGestion} className="space-y-4 text-xs font-sans">
+                {/* Evidencia Fotográfica Sanitizada (rechaza protocolos locales como file://) */}
+                {itemSeleccionado.origen === "ciudadano" && (
+                  <div>
+                    <label className="block text-zinc-400 font-mono mb-1 text-[10px] uppercase tracking-wider">
+                      Evidencia Fotográfica
+                    </label>
+                    {sanitizarUrlFotografia(itemSeleccionado.fotografia_url) ? (
+                      <div className="rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 p-2 space-y-2">
+                        <img
+                          src={sanitizarUrlFotografia(itemSeleccionado.fotografia_url)}
+                          alt="Evidencia fotográfica adjunta al reclamo"
+                          className="w-full max-h-48 object-cover rounded-lg border border-zinc-800"
+                        />
+                        <div className="flex justify-end">
+                          <a
+                            href={sanitizarUrlFotografia(itemSeleccionado.fotografia_url)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] font-mono text-blue-400 hover:underline flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>Abrir imagen original</span>
+                          </a>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-zinc-950/60 rounded-xl border border-zinc-800 text-[11px] font-mono text-zinc-500 italic">
+                        Sin fotografía adjunta
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-zinc-400 font-mono mb-1">CAMBIAR ESTADO</label>
                   <select

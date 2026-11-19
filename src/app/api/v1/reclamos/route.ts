@@ -27,7 +27,9 @@ export async function GET(peticion: NextRequest) {
     if (estado) filtro.estado = estado;
     if (rutaId) filtro.ruta_id = rutaId;
 
-    const reclamos = await ModeloReclamo.find(filtro).sort({ fecha_reporte: -1 }).limit(100);
+    const reclamos = await ModeloReclamo.find(filtro)
+      .sort({ fecha_creacion: -1, fecha_reporte: -1, _id: -1 })
+      .limit(100);
 
     return NextResponse.json({
       exito: true,
@@ -74,6 +76,11 @@ export async function POST(peticion: NextRequest) {
 
     const folio = `REC-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 
+    // Sanitizar fotografia_url para rechazar protocolos file:///
+    const fotoLimpia = typeof fotografia_url === "string" && !/^file:/i.test(fotografia_url.trim())
+      ? fotografia_url.trim()
+      : "";
+
     const nuevoReclamo = await ModeloReclamo.create({
       folio,
       ciudadano_id_clerk: actor.usuario.id,
@@ -87,7 +94,7 @@ export async function POST(peticion: NextRequest) {
       },
       tipo_incidencia: tipo_incidencia || "CAMION_NO_PASO",
       descripcion: descripcion || "Reporte sin descripción adicional.",
-      fotografia_url: fotografia_url || "",
+      fotografia_url: fotoLimpia,
       ruta_id: ruta_id || null,
       estado: "PENDIENTE",
     });
