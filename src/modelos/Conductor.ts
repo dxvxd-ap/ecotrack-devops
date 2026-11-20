@@ -3,9 +3,10 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export interface InterfazConductor extends Document {
   nombre_completo: string;
   numero_licencia: string;
+  licencia?: string;
   telefono: string;
   activo: boolean;
-  camion_asignado_id?: mongoose.Types.ObjectId;
+  camion_asignado_id?: mongoose.Types.ObjectId | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -24,6 +25,12 @@ const EsquemaConductor = new Schema<InterfazConductor>(
       trim: true,
       uppercase: true,
     },
+    licencia: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: undefined,
+    },
     telefono: {
       type: String,
       required: true,
@@ -41,9 +48,10 @@ const EsquemaConductor = new Schema<InterfazConductor>(
   },
   {
     timestamps: { createdAt: "fecha_creacion", updatedAt: "fecha_actualizacion" },
+    collection: "conductors",
   }
 );
 
 export const ModeloConductor: Model<InterfazConductor> =
-  mongoose.models.Conductor || mongoose.model<InterfazConductor>("Conductor", EsquemaConductor);
-
+  mongoose.models.Conductor ||
+  mongoose.model<InterfazConductor>("Conductor", EsquemaConductor, "conductors");
