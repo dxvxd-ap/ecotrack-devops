@@ -8,7 +8,7 @@ import { posicionParaMapa } from '../servicios/posicion.ts';
 import { useDomicilioSesion } from './DomicilioSesion.tsx';
 import { Cuenta } from './Cuenta.tsx';
 import { ConsejosEcologicos } from './ConsejosEcologicos.tsx';
-import { ReportarProblema } from './ReportarProblema.tsx';
+import { Reportes } from './Reportes.tsx';
 import { inicializarNotificacionesPush } from '../servicios/push.ts';
 
 export type Tema = 'light' | 'dark' | 'auto';
@@ -39,10 +39,12 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
 
   // Keep Cuenta mounted to preserve state across tab switches
   const [cuentaMontada, setCuentaMontada] = useState(false);
+  const [reportesMontados, setReportesMontados] = useState(false);
 
   // Activate Cuenta mount on first visit to preserve sync/domicilio state
   useEffect(() => {
     if (tab === 'cuenta') setCuentaMontada(true);
+    if (tab === 'reportes') setReportesMontados(true);
   }, [tab]);
 
   useEffect(() => {
@@ -118,13 +120,16 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
       </div>
     </div>
     <div hidden={tab !== 'cuenta'}>{cuentaMontada && <Cuenta configurada={clerkConfigurado} tema={tema} temaMapa={temaResuelto} />}</div>
-    {tab === 'reportes' && (
-      <ReportarProblema
-        rutas={rutas}
-        domicilioCoordenadas={domicilio?.ubicacion.coordinates ?? null}
-        onReporteExitoso={() => setTab('inicio')}
-      />
-    )}
+    <div hidden={tab !== 'reportes'}>
+      {reportesMontados && <Reportes
+        configurada={clerkConfigurado}
+        tema={temaResuelto}
+        activo={tab === 'reportes'}
+        irCuenta={() => setTab('cuenta')}
+        rutas={demo || datosMapa.demostracion ? [] : rutas.features.flatMap(({ properties }) =>
+          properties.idPersistido ? [{ id: properties.idPersistido, nombre: properties.nombre }] : [])}
+      />}
+    </div>
     {error && <div className="aviso-flotante" role="alert"><p>{error}</p><button className="icono" aria-label="Cerrar aviso" onClick={() => setError(null)}><X size={18}/></button></div>}
     <nav className="navegacion isla" aria-label="Navegación principal">{tabs.map(({ id, texto, Icono }) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if (id === 'rutas') setExpandido(true); }}><Icono size={21}/><span>{texto}</span></button>)}</nav>
   </main>;
