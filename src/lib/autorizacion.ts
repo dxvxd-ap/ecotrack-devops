@@ -8,10 +8,10 @@ import { ModeloBloqueoAdministrativo } from "@/modelos/BloqueoAdministrativo";
 export const ROLES_INFERIORES = ["secretario", "moderador", "ciudadano", "conductor", "camion"] as const;
 export const ROLES_CONOCIDOS: readonly string[] = ["superadmin", "admin", ...ROLES_INFERIORES];
 export type PermisoAdministrativo = "usuarios:ver" | "usuarios:gestionar" | "usuarios:eliminar" |
-  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver" | "rutas:gestionar" | "reclamos:ver";
+  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver" | "rutas:gestionar" | "reclamos:ver" | "reclamos:gestionar";
 const PERMISOS: Record<string, readonly PermisoAdministrativo[]> = {
-  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver"],
-  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver"],
+  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar"],
+  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar"],
   secretario: ["dashboard:ver"],
   moderador: ["dashboard:ver"],
 };

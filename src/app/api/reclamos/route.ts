@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
-import { auth } from "@clerk/nextjs/server";
-import { identidad_autenticada, estado_cuenta, ErrorAdministrativo } from "@/lib/autorizacion";
+import { autorizar_administracion } from "@/lib/autorizacion";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export const dynamic = "force-dynamic";
@@ -34,28 +33,7 @@ function sanitizarUrlFotografia(url?: string | null): string {
  */
 export async function GET(peticion: NextRequest) {
   try {
-    const sesion = await auth();
-    const userId = sesion?.userId;
-
-    if (!userId) {
-      return NextResponse.json(
-        { exito: false, ok: false, mensaje: "No hay sesión activa de usuario", codigo: "ERR_NO_AUTENTICADO" },
-        { status: 401 }
-      );
-    }
-
-    // Validación tolerante de estado de cuenta: si se puede verificar sin bloquear, se verifica;
-    // un usuario recién registrado o sin publicMetadata.role en Clerk NO debe ser rechazado al consultar el dashboard.
-    try {
-      const usuario = await identidad_autenticada(userId);
-      await estado_cuenta(usuario);
-    } catch (errAuth) {
-      if (errAuth instanceof ErrorAdministrativo && errAuth.status === 403) {
-        return manejarErrorApi(errAuth, "reclamos:consultar");
-      }
-      console.warn("[Reclamos] Verificación estricta de Clerk omitida para usuario autenticado:", userId);
-    }
-
+    const { usuario } = await autorizar_administracion("reclamos:ver");
     await conectar_base_datos();
 
     const { searchParams } = new URL(peticion.url);
@@ -68,9 +46,9 @@ export async function GET(peticion: NextRequest) {
 
     const filtro: Record<string, any> = {};
 
-    // Si se solicita explícitamente filtrar por el usuario autenticado (ej. vista ciudadana)
+    // Filtro opcional aplicado después de la autorización municipal.
     if (soloPropios) {
-      filtro.ciudadano_id_clerk = userId;
+      filtro.ciudadano_id_clerk = usuario.id;
     }
 
     if (estado && estado !== "todos") {

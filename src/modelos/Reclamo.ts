@@ -1,10 +1,18 @@
+import type { EventoAtencion } from "@/contratos/reclamos_admin";
+import type { AcuseReclamoR1 } from "@/contratos/reclamos";
 import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface InterfazReclamo extends Document {
+  version_atencion?: number;
+  respuesta_publica?: string;
+  historial_atencion?: EventoAtencion[];
   ciudadano_id_clerk?: string;
   folio: string;
   ciudadano_nombre: string;
-  ciudadano_telefono: string;
+  ciudadano_telefono?: string;
+  contrato_creacion?: "reclamos-r1";
+  origen_ubicacion?: "manual" | "gps" | "domicilio";
+  operacion?: { id: string; hash: string; normalizacion_version: number; acuse: AcuseReclamoR1 };
   ciudadano_email?: string;
   domicilio_referencia: string;
   ubicacion: {
@@ -22,8 +30,36 @@ export interface InterfazReclamo extends Document {
   fecha_resolucion?: Date;
 }
 
+const EsquemaAcuse = new Schema({
+  id: { type: String, required: true, immutable: true }, folio: { type: String, required: true, immutable: true },
+  recibido_en: { type: String, required: true, immutable: true }, estado_inicial: { type: String, enum: ["PENDIENTE"], required: true, immutable: true },
+}, { _id: false });
+const EsquemaOperacion = new Schema({
+  id: { type: String, required: true, immutable: true }, hash: { type: String, required: true, immutable: true },
+  normalizacion_version: { type: Number, enum: [1], required: true, immutable: true },
+  acuse: { type: EsquemaAcuse, required: true, immutable: true },
+}, { _id: false });
+
+const EsquemaEventoAtencion = new Schema({
+  id: { type: String, required: true, immutable: true },
+  funcionario_id_clerk: { type: String, required: true, immutable: true },
+  funcionario_nombre: { type: String, required: true, immutable: true },
+  funcionario_rol: { type: String, enum: ["admin", "superadmin"], required: true, immutable: true },
+  accion: { type: String, enum: ["CAMBIAR_ESTADO", "RESPONDER", "AGREGAR_NOTA"], required: true, immutable: true },
+  estado_anterior: { type: String, required: true, immutable: true }, estado_nuevo: { type: String, required: true, immutable: true },
+  fecha: { type: String, required: true, immutable: true }, version: { type: Number, required: true, immutable: true },
+  respuesta_publica: { type: String, default: null, immutable: true }, nota_interna: { type: String, default: null, immutable: true },
+  idempotencia: { type: new Schema({ id: String, hash: String, normalizacion_version: Number }, { _id: false }), required: true, immutable: true },
+}, { _id: false });
+
 const EsquemaReclamo = new Schema<InterfazReclamo>(
   {
+    version_atencion: { type: Number, min: 0 },
+    respuesta_publica: { type: String },
+    historial_atencion: { type: [EsquemaEventoAtencion], default: undefined },
+    contrato_creacion: { type: String, enum: ["reclamos-r1"], immutable: true },
+    origen_ubicacion: { type: String, enum: ["manual", "gps", "domicilio"] },
+    operacion: { type: EsquemaOperacion, immutable: true, required: function () { return this.contrato_creacion === "reclamos-r1"; } },
     // Opcional: los históricos permanecen sin propietario, sin atribución por correo.
     ciudadano_id_clerk: { type: String, index: true, immutable: true },
     folio: {
@@ -39,7 +75,7 @@ const EsquemaReclamo = new Schema<InterfazReclamo>(
     },
     ciudadano_telefono: {
       type: String,
-      required: true,
+      required: function () { return this.contrato_creacion !== "reclamos-r1"; },
       trim: true,
     },
     ciudadano_email: {
@@ -106,6 +142,9 @@ const EsquemaReclamo = new Schema<InterfazReclamo>(
     },
   },
   {
+    // Solo este modelo: la preparación de índices/colección es una operación explícita.
+    autoIndex: false,
+    autoCreate: false,
     timestamps: { createdAt: "fecha_creacion", updatedAt: "fecha_actualizacion" },
   }
 );

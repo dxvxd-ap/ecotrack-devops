@@ -1,7 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { autorizar_reclamos, correo_principal, ErrorAdministrativo, respuesta_error_administrativo } from "@/lib/autorizacion";
+import { NextRequest } from "next/server";
+import { autorizar_reclamos, correo_principal, ErrorAdministrativo } from "@/lib/autorizacion";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
+import { validarOperacionReclamo, validarConsultaReclamosR1, validarCreacionReclamoR1, validarCreacionReclamoHeredado,
+  serializarResumenCiudadano, serializarDetalleCiudadano, serializarDetalleAdministrativo, serializarReclamoHeredado } from "@/contratos/reclamos";
+import { negociarContratoReclamos, leerJsonReclamos, respuestaReclamos, errorReclamos } from "@/lib/http_reclamos";
+import { autorizar_ciudadano } from "@/lib/autorizacion_ciudadana";
+import { persistirReclamoR1 } from "@/lib/persistencia_reclamos";
+import { validar_origen_ciudadano } from "@/lib/http_ciudadano";
 
 /**
  * GET /api/v1/reclamos
@@ -10,8 +16,10 @@ import { ModeloReclamo } from "@/modelos/Reclamo";
 export async function GET(peticion: NextRequest) {
   try {
     const actor = await autorizar_reclamos();
+    const contrato = negociarContratoReclamos(peticion);
     await conectar_base_datos();
     const { searchParams } = new URL(peticion.url);
+    const consultaR1 = contrato === "r1" ? validarConsultaReclamosR1(searchParams) : null;
     const estado = searchParams.get("estado");
     const rutaId = searchParams.get("ruta_id");
 
@@ -22,21 +30,25 @@ export async function GET(peticion: NextRequest) {
       if (!/^[a-fA-F0-9]{24}$/.test(id)) throw new ErrorAdministrativo(400, "Identificador de reclamo inválido");
       filtro._id = id;
     }
-    const folio = searchParams.get("folio");
+    const folio = consultaR1 ? consultaR1.folio : searchParams.get("folio");
     if (folio) filtro.folio = folio;
     if (estado) filtro.estado = estado;
-    if (rutaId) filtro.ruta_id = rutaId;
+    if (rutaId) filtro.ruta_id = contrato === "r1" ? rutaId.toLowerCase() : rutaId;
 
-    const reclamos = await ModeloReclamo.find(filtro)
-      .sort({ fecha_creacion: -1, fecha_reporte: -1, _id: -1 })
-      .limit(100);
+    const orden: Record<string, -1> = contrato === "r1"
+      ? { fecha_reporte: -1 }
+      : { fecha_creacion: -1, fecha_reporte: -1, _id: -1 };
+    const reclamos = await ModeloReclamo.find(filtro).sort(orden).limit(100);
 
-    return NextResponse.json({
-      exito: true,
-      datos: reclamos,
-    });
+    if (contrato === "heredado") {
+      const vista = actor.rol === "ciudadano" ? "ciudadana" : "administrativa";
+      return respuestaReclamos(reclamos.map(r => serializarReclamoHeredado(r, vista)));
+    }
+    const serializar = actor.rol !== "ciudadano" ? serializarDetalleAdministrativo
+      : id || folio ? serializarDetalleCiudadano : serializarResumenCiudadano;
+    return respuestaReclamos(reclamos.map(r => serializar(r)));
   } catch (error: unknown) {
-    return respuesta_error_administrativo(error);
+    return errorReclamos(error);
   }
 }
 
@@ -47,10 +59,19 @@ export async function GET(peticion: NextRequest) {
 export async function POST(peticion: NextRequest) {
   try {
     const actor = await autorizar_reclamos();
+    const contrato = negociarContratoReclamos(peticion);
+    validar_origen_ciudadano(peticion);
+    const entrada = await leerJsonReclamos(peticion);
+    if (contrato === "r1") {
+      if (actor.rol !== "ciudadano") throw new ErrorAdministrativo(403, "Se requiere una cuenta ciudadana");
+      const ciudadano = await autorizar_ciudadano();
+      const datos = validarCreacionReclamoR1(entrada);
+      const id = validarOperacionReclamo(peticion.headers.get("Idempotency-Key"));
+      const resultado = await persistirReclamoR1(ciudadano, datos, id);
+      return respuestaReclamos(resultado.acuse, undefined, resultado.nuevo ? 201 : 200);
+    }
     await conectar_base_datos();
-    const cuerpo = await peticion.json();
-    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) throw new ErrorAdministrativo(400, "Cuerpo de solicitud inválido");
-    if (Object.hasOwn(cuerpo, "ciudadano_id_clerk")) throw new ErrorAdministrativo(400, "El propietario lo determina la sesión autenticada");
+    const cuerpo = validarCreacionReclamoHeredado(entrada);
     const principal = correo_principal(actor.usuario);
     if (!principal || principal.verification?.status !== "verified") throw new ErrorAdministrativo(403, "Se requiere un correo principal verificado");
     const ciudadano_nombre = [actor.usuario.firstName, actor.usuario.lastName].filter(Boolean).join(" ") || "Ciudadano EcoTrack";
@@ -67,19 +88,7 @@ export async function POST(peticion: NextRequest) {
       ruta_id,
     } = cuerpo;
 
-    if (!ciudadano_telefono || !domicilio_referencia || latitud === undefined || longitud === undefined) {
-      return NextResponse.json(
-        { exito: false, mensaje: "Faltan campos obligatorios: teléfono, domicilio y coordenadas." },
-        { status: 400 }
-      );
-    }
-
     const folio = `REC-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
-
-    // Sanitizar fotografia_url para rechazar protocolos file:///
-    const fotoLimpia = typeof fotografia_url === "string" && !/^file:/i.test(fotografia_url.trim())
-      ? fotografia_url.trim()
-      : "";
 
     const nuevoReclamo = await ModeloReclamo.create({
       folio,
@@ -94,17 +103,13 @@ export async function POST(peticion: NextRequest) {
       },
       tipo_incidencia: tipo_incidencia || "CAMION_NO_PASO",
       descripcion: descripcion || "Reporte sin descripción adicional.",
-      fotografia_url: fotoLimpia,
+      fotografia_url: /^file:/i.test(fotografia_url.trim()) ? "" : fotografia_url.trim(),
       ruta_id: ruta_id || null,
       estado: "PENDIENTE",
     });
 
-    return NextResponse.json({
-      exito: true,
-      mensaje: "Reclamo registrado exitosamente en el sistema municipal de Gutiérrez Zamora.",
-      datos: nuevoReclamo,
-    });
+    return respuestaReclamos(serializarReclamoHeredado(nuevoReclamo, actor.rol === "ciudadano" ? "ciudadana" : "administrativa"), "Reclamo registrado exitosamente en el sistema municipal de Gutiérrez Zamora.");
   } catch (error: unknown) {
-    return respuesta_error_administrativo(error);
+    return errorReclamos(error);
   }
 }
