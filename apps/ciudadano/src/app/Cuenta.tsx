@@ -473,6 +473,7 @@ function CuentaSesion({ configurada, tema, temaMapa, alSincronizar }: { configur
             {!mostrarSignUp ? (
               <>
                 <SignIn
+                  routing="hash"
                   appearance={aparienciaClerk}
                 />
                 <div className="auth-footer">
@@ -482,6 +483,7 @@ function CuentaSesion({ configurada, tema, temaMapa, alSincronizar }: { configur
             ) : (
               <>
                 <SignUp
+                  routing="hash"
                   appearance={aparienciaClerk}
                 />
                 <div className="auth-footer">

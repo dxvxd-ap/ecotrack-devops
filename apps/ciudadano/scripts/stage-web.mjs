@@ -43,6 +43,6 @@ export async function stageWeb(source, target) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const files = await stageWeb(join(app, 'dist'), resolve(app, '../../public/eco'));
+  const files = await stageWeb(join(app, 'dist-eco'), resolve(app, '../../public/eco'));
   console.log(`Build web preparado en public/eco (${files.length} archivos). Sin despliegue.`);
 }

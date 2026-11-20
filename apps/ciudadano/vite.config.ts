@@ -4,9 +4,19 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode, isPreview }) => {
   const android = mode === 'android';
+  const bajoEco = !android && (mode === 'eco' || (command === 'serve' && !isPreview));
+  const base = bajoEco ? '/eco/' : '/';
+  const inicio = bajoEco ? '/eco/index.html' : '/';
   const env = loadEnv(mode, process.cwd(), 'VITE_');
+  if (command === 'build' && !android && !bajoEco && env.VITE_API_ORIGIN?.trim()) {
+    throw new Error('La PWA independiente requiere VITE_API_ORIGIN vacío y usa el proxy /api.');
+  }
+  if (command === 'build' && env.VITE_CLERK_PUBLISHABLE_KEY?.trim() &&
+    !/^pk_(test|live)_[A-Za-z0-9+/=]+$/.test(env.VITE_CLERK_PUBLISHABLE_KEY.trim())) {
+    throw new Error('VITE_CLERK_PUBLISHABLE_KEY debe ser una clave pública de Clerk.');
+  }
   const target = env.VITE_DEV_API_ORIGIN || 'http://127.0.0.1:3000';
   const https = process.env.ECOTRACK_HTTPS === '1' ? {
     key: readFileSync(resolve('.certs/localhost.key')),
@@ -17,16 +27,20 @@ export default defineConfig(({ mode }) => {
     if (url.protocol !== 'https:' && !(['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol === 'http:')) throw new Error('El proxy de desarrollo requiere HTTPS o localhost.');
   }
   return {
-    base: android ? '/' : '/eco/',
-    define: { __ANDROID_BUILD__: JSON.stringify(android) },
+    base,
+    appType: 'mpa',
+    define: {
+      __ANDROID_BUILD__: JSON.stringify(android),
+      __PERMITIR_API_LOOPBACK__: JSON.stringify(bajoEco),
+    },
     plugins: [react(), ...(!android ? [VitePWA({
       registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['favicon.ico', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png'],
       manifest: {
-        id: '/eco/', name: 'EcoTrack Ciudadano', short_name: 'EcoTrack', lang: 'es-MX',
+        id: base, name: 'EcoTrack Ciudadano', short_name: 'EcoTrack', lang: 'es-MX',
         description: 'Rutas e información del servicio de recolección de Gutiérrez Zamora.',
-        start_url: '/eco/index.html', scope: '/eco/', display: 'standalone',
+        start_url: inicio, scope: base, display: 'standalone',
         theme_color: '#0A0F1A', background_color: '#0A0F1A',
         icons: [
           { src: 'apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
@@ -35,8 +49,8 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
-        navigateFallback: '/eco/index.html',
-        navigateFallbackAllowlist: [/^\/eco\/(?:index\.html)?$/],
+        navigateFallback: base + 'index.html',
+        navigateFallbackAllowlist: [bajoEco ? /^\/eco\/(?:index\.html)?$/ : /^\/(?:index\.html)?$/],
         globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
@@ -44,7 +58,7 @@ export default defineConfig(({ mode }) => {
       },
       devOptions: { enabled: false },
     })] : [])],
-    build: { outDir: android ? 'dist-android' : 'dist', sourcemap: false },
+    build: { outDir: android ? 'dist-android' : bajoEco ? 'dist-eco' : 'dist', sourcemap: false },
     server: {
       port: 5173, strictPort: true, https,
       fs: { deny: ['.env', '.env.*', '*.{crt,pem,key}', '**/.git/**', '**/.certs/**'] },

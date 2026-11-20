@@ -39,7 +39,8 @@ export function configurar({ android, api = '' }: { android: boolean; api?: stri
   if (!api && !android) return { api: '' };
   let url: URL;
   try { url = new URL(api); } catch { throw new Error('Configura una API HTTPS absoluta.'); }
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  const local = (typeof __PERMITIR_API_LOOPBACK__ === 'undefined' || __PERMITIR_API_LOOPBACK__) &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && (android || !local || url.protocol !== 'http:')) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new Error('La API requiere un origen HTTPS sin credenciales, ruta ni parámetros.');
   }
