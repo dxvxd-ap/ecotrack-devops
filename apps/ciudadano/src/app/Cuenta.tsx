@@ -197,18 +197,18 @@ function IncertidumbreAviso({ onConsultar }: { onConsultar: () => void }) {
   );
 }
 
-export function Cuenta({ configurada, tema, temaMapa }: { configurada: boolean; tema?: Tema; temaMapa?: 'light' | 'dark' }) {
+export function Cuenta({ configurada, tema, temaMapa, alSincronizar }: { configurada: boolean; tema?: Tema; temaMapa?: 'light' | 'dark'; alSincronizar?: () => void }) {
   if (!configurada) return <section className="panel"><p className="eyebrow">TU ECOTRACK</p><h1>Tu cuenta, cerca de ti.</h1><div className="aviso isla">Acceso pendiente de habilitar. Mientras tanto, puedes consultar las rutas sin iniciar sesión.</div></section>;
-  return <CuentaConProveedor tema={tema} temaMapa={temaMapa} />;
+  return <CuentaConProveedor tema={tema} temaMapa={temaMapa} alSincronizar={alSincronizar} />;
 }
 
-function CuentaConProveedor({ tema, temaMapa }: { tema?: Tema; temaMapa?: 'light' | 'dark' }) {
+function CuentaConProveedor({ tema, temaMapa, alSincronizar }: { tema?: Tema; temaMapa?: 'light' | 'dark'; alSincronizar?: () => void }) {
   const { userId, sessionId } = useAuth();
   // Una sesión nueva obtiene un estado nuevo, incluso en un cambio directo A → B.
-  return <CuentaSesion key={`${userId ?? 'visitante'}:${sessionId ?? ''}`} configurada tema={tema} temaMapa={temaMapa} />;
+  return <CuentaSesion key={`${userId ?? 'visitante'}:${sessionId ?? ''}`} configurada tema={tema} temaMapa={temaMapa} alSincronizar={alSincronizar} />;
 }
 
-function CuentaSesion({ configurada, tema, temaMapa }: { configurada: boolean; tema?: Tema; temaMapa?: 'light' | 'dark' }) {
+function CuentaSesion({ configurada, tema, temaMapa, alSincronizar }: { configurada: boolean; tema?: Tema; temaMapa?: 'light' | 'dark'; alSincronizar?: () => void }) {
   const { isSignedIn, isLoaded } = useUser();
   const auth = useAuth();
   const [mostrarSignUp, setMostrarSignUp] = useState(false);
@@ -254,13 +254,14 @@ function CuentaSesion({ configurada, tema, temaMapa }: { configurada: boolean; t
       if (!vigenteRef.current) return;
       syncCompletadoRef.current = true;
       setSyncEstado('done');
+      alSincronizar?.();
     } catch {
       if (vigenteRef.current) setSyncEstado('error');
     } finally {
       clearTimeout(timeout);
       syncEnCursoRef.current = false;
     }
-  }, [auth.getToken]);
+  }, [auth.getToken, alSincronizar]);
 
   useEffect(() => {
     if (isLoaded && isSignedIn) void handleSync();

@@ -6,7 +6,7 @@ import { crearEnvioReporte, memoriaOperacionReporte, type EnvioReporte } from '.
 import { UbicacionReporte } from './UbicacionReporte.tsx';
 import './reportes.css';
 
-type Props={configurada:boolean;tema:'light'|'dark';activo:boolean;irCuenta:()=>void;rutas:{id:string;nombre:string}[]};
+type Props={configurada:boolean;tema:'light'|'dark';activo:boolean;irCuenta:()=>void;rutas:{id:string;nombre:string}[];destinoAviso?:{id:string}};
 const fecha=(f:string|null)=>f?new Date(f).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'}):'Fecha no disponible';
 const etiquetaEstado=(estado:ResumenReporte['estado'])=>estado?ESTADOS_REPORTES[estado]:'Estado no disponible';
 function Encabezado(){return <header className="reportes-cabecera"><span className="reportes-emblema"><Bell size={24} aria-hidden="true"/></span><p className="eyebrow">REPORTES CIUDADANOS</p><h1>Tu reporte hace la diferencia.</h1><p>Cuéntanos qué ocurre y consulta la respuesta del municipio.</p></header>;}
@@ -46,13 +46,19 @@ function AccesoReportes(props:Props&{usuario:string;obtenerToken:()=>Promise<str
   if(!acceso)return <p role="status">Preparando tus reportes…</p>;
   return <PanelReportes {...props} api={api} obtenerToken={()=>tokenRef.current()} {...acceso}/>;
 }
-export function PanelReportes({api,envio,obtenerToken,domicilio,persistencia,tema,activo,rutas,irCuenta}:{api:ReturnType<typeof crearServicioReportes>;envio:EnvioReporte;obtenerToken:()=>Promise<string|null>;domicilio:[number,number]|null;persistencia:boolean}&Pick<Props,'tema'|'activo'|'rutas'|'irCuenta'>){
+export function PanelReportes({api,envio,obtenerToken,domicilio,persistencia,tema,activo,rutas,irCuenta,destinoAviso}:{api:ReturnType<typeof crearServicioReportes>;envio:EnvioReporte;obtenerToken:()=>Promise<string|null>;domicilio:[number,number]|null;persistencia:boolean}&Pick<Props,'tema'|'activo'|'rutas'|'irCuenta'|'destinoAviso'>){
   const estado=useSyncExternalStore(envio.subscribe,envio.getSnapshot,envio.getSnapshot);
-  const [vista,setVista]=useState<'lista'|'nuevo'>(estado.clave?'nuevo':'lista'),[reportes,setReportes]=useState<ResumenReporte[]>([]),[cargando,setCargando]=useState(true),[errorLista,setErrorLista]=useState<string|null>(null),[intento,setIntento]=useState(0);
-  const [seleccion,setSeleccion]=useState<string|null>(null),[detalle,setDetalle]=useState<DetalleReporte|null>(null),[cargandoDetalle,setCargandoDetalle]=useState(false),[errorDetalle,setErrorDetalle]=useState<string|null>(null);
+  const [vista,setVista]=useState<'lista'|'nuevo'>(estado.clave&&!destinoAviso?'nuevo':'lista'),[reportes,setReportes]=useState<ResumenReporte[]>([]),[cargando,setCargando]=useState(true),[errorLista,setErrorLista]=useState<string|null>(null),[intento,setIntento]=useState(0);
+  const [seleccion,setSeleccion]=useState<string|null>(destinoAviso?.id??null),[detalle,setDetalle]=useState<DetalleReporte|null>(null),[cargandoDetalle,setCargandoDetalle]=useState(false),[errorDetalle,setErrorDetalle]=useState<string|null>(null);
   const tokenRef=useRef(obtenerToken);tokenRef.current=obtenerToken;
   const [codigo,setCodigo]=useState(''),[errorCodigo,setErrorCodigo]=useState(false),[formularioVersion,setFormularioVersion]=useState(0),[formularioMontado,setFormularioMontado]=useState(vista==='nuevo');
   useEffect(()=>{if(vista==='nuevo')setFormularioMontado(true);},[vista]);
+  useLayoutEffect(() => {
+    if (destinoAviso) {
+      setVista('lista');
+      setSeleccion(destinoAviso.id);
+    }
+  }, [destinoAviso]);
   useLayoutEffect(()=>{
     const c=new AbortController();let vigente=true;setCargando(true);setErrorLista(null);
     void(async()=>{try{const t=await tokenRef.current();if(!t)throw new ErrorReportes(401,'SIN_SESION');if(!vigente)return;const d=await api.listar(t,c.signal);if(vigente)setReportes(d);}catch(e){if(vigente){setReportes([]);setErrorLista(e instanceof ErrorReportes?e.message:'No pudimos consultar tus reportes.');}}finally{if(vigente)setCargando(false);}})();

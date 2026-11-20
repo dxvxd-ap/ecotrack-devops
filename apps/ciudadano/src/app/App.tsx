@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Bell, ChevronDown, ChevronUp, House, Leaf, LocateFixed, MapPin, RefreshCw, Route, ShieldCheck, Truck, UserRound, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useAuth } from '@clerk/react';
+import { Bell, ChevronDown, ChevronUp, House, Leaf, LocateFixed, MapPin, MessageSquare, RefreshCw, Route, Truck, UserRound, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Mapa } from '../mapas/Mapa.tsx';
 import { configurar, type ColeccionRutas } from '../servicios/contratos.ts';
@@ -7,17 +8,31 @@ import { cargarDatosMapa, datosVisibles, permitirDemo, type DatosMapa } from '..
 import { posicionParaMapa } from '../servicios/posicion.ts';
 import { useDomicilioSesion } from './DomicilioSesion.tsx';
 import { Cuenta } from './Cuenta.tsx';
-import { ConsejosEcologicos } from './ConsejosEcologicos.tsx';
 import { Reportes } from './Reportes.tsx';
+import { Avisos, type SesionAvisos } from './Avisos.tsx';
+import { ConsejosEcologicos } from './ConsejosEcologicos.tsx';
 import { inicializarNotificacionesPush } from '../servicios/push.ts';
 
 export type Tema = 'light' | 'dark' | 'auto';
 
 const sinRutas: ColeccionRutas = { type: 'FeatureCollection', features: [] };
-const tabs = [{ id: 'inicio', texto: 'Inicio', Icono: House }, { id: 'rutas', texto: 'Rutas', Icono: Route }, { id: 'reportes', texto: 'Reportes', Icono: Bell }, { id: 'cuenta', texto: 'Cuenta', Icono: UserRound }] as const;
+const tabs = [{ id: 'inicio', texto: 'Inicio', Icono: House }, { id: 'avisos', texto: 'Avisos', Icono: Bell }, { id: 'reportes', texto: 'Reportes', Icono: MessageSquare }, { id: 'cuenta', texto: 'Cuenta', Icono: UserRound }] as const;
 type Tab = typeof tabs[number]['id'];
 
-export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkConfigurado: boolean; tema?: Tema; temaResuelto?: 'light' | 'dark' }) {
+type PropsApp = { clerkConfigurado: boolean; tema?: Tema; temaResuelto?: 'light' | 'dark' };
+export function App(props: PropsApp) {
+  return props.clerkConfigurado ? <AppConClerk {...props} /> : <AppContenido {...props} sesion={null} />;
+}
+
+function AppConClerk(props: PropsApp) {
+  const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
+  const sesion = isLoaded && isSignedIn && userId && sessionId
+    ? { clave: JSON.stringify([userId, sessionId]), obtenerToken: getToken } : null;
+  return <AppContenido {...props} sesion={sesion} cargandoSesion={!isLoaded} />;
+}
+
+function AppContenido({ clerkConfigurado, tema, temaResuelto = 'light', sesion, cargandoSesion = false }:
+  PropsApp & { sesion: SesionAvisos | null; cargandoSesion?: boolean }) {
   const { domicilio } = useDomicilioSesion();
   const [tab, setTab] = useState<Tab>('inicio');
   const demoPermitida = permitirDemo({ desarrollo: import.meta.env.DEV, habilitada: import.meta.env.VITE_ENABLE_DEV_TOOLS, android: __ANDROID_BUILD__ });
@@ -36,12 +51,25 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
   const [recentro, setRecentro] = useState(0);
   const [localizando, setLocalizando] = useState(false);
   const [lecturaUbicacion, setLecturaUbicacion] = useState<{ precisionMetros: number; timestamp: number } | null>(null);
+  const [contador, setContador] = useState<{ clave: string; total: number | null } | null>(null);
+  const publicarContador = useCallback((clave: string, total: number | null) => setContador({ clave, total }), []);
+  const avisosSinLeer = contador?.clave === sesion?.clave ? contador?.total ?? 0 : 0;
+  const [reporteAviso, setReporteAviso] = useState<{ clave: string; id: string } | null>(null);
+  const claveSesion = sesion?.clave;
+  const [perfilSincronizado, setPerfilSincronizado] = useState<string>();
+  const alSincronizar = useCallback(() => setPerfilSincronizado(claveSesion), [claveSesion]);
+  useLayoutEffect(() => {
+    setContador(actual => actual?.clave === claveSesion ? actual : null);
+    setReporteAviso(actual => actual?.clave === claveSesion ? actual : null);
+    setPerfilSincronizado(actual => actual === claveSesion ? actual : undefined);
+  }, [claveSesion]);
+  const rutaDisponible = (id: string) => !demo && !datosMapa.demostracion && rutas.features.some(r => r.properties.idPersistido === id);
 
   // Keep Cuenta mounted to preserve state across tab switches
   const [cuentaMontada, setCuentaMontada] = useState(false);
   const [reportesMontados, setReportesMontados] = useState(false);
 
-  // Activate Cuenta mount on first visit to preserve sync/domicilio state
+  // Activate mounts on first visit to preserve state across tab switches
   useEffect(() => {
     if (tab === 'cuenta') setCuentaMontada(true);
     if (tab === 'reportes') setReportesMontados(true);
@@ -97,8 +125,8 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
   const rutaElegida = rutas.features.find(r => r.properties.id === seleccion);
   const estadoRutas = cargando || datosMapa.demostracion !== demo ? 'Buscando rutas de recolección…' : falloRutas ? 'Rutas no disponibles por ahora' : rutas.features.length ? `${rutas.features.length} ${rutas.features.length === 1 ? 'ruta disponible' : 'rutas disponibles'}` : 'Todavía no hay rutas disponibles';
   return <main className="app">
-    <div className="vista-mapa" hidden={tab === 'reportes' || tab === 'cuenta'}>
-      <Mapa rutas={rutas} vehiculos={vehiculos} ubicacion={ubicacion} recentrar={recentro} seleccion={seleccion} onSeleccionar={setSeleccion} visible={tab === 'inicio' || tab === 'rutas'} expandido={expandido} tema={temaResuelto} domicilio={domicilio?.ubicacion.coordinates ?? null} />
+    <div className="vista-mapa" hidden={tab === 'reportes' || tab === 'cuenta' || tab === 'avisos'}>
+      <Mapa rutas={rutas} vehiculos={vehiculos} ubicacion={ubicacion} recentrar={recentro} seleccion={seleccion} onSeleccionar={setSeleccion} visible={tab === 'inicio'} expandido={expandido} tema={temaResuelto} domicilio={domicilio?.ubicacion.coordinates ?? null} />
       <header className="cabecera isla"><a className="marca" href={`${import.meta.env.BASE_URL}index.html`} aria-label="EcoTrack inicio"><Leaf size={25} /><span>Eco<span>Track</span></span></a><span className="municipio"><MapPin size={13} /> Gutiérrez Zamora</span><button className="icono" aria-label="Abrir cuenta" onClick={() => setTab('cuenta')}><UserRound size={20}/></button></header>
       <div className="estado-servicio isla"><span className={`punto ${!online ? 'sin-red' : ''}`} /><span>{!online ? 'Sin conexión · la información puede estar desactualizada' : demo ? 'Demostración · datos simulados' : 'Rutas de recolección'}</span></div>
       <div className="herramientas"><button className="icono isla" aria-label="Obtener mi ubicación" disabled={localizando} onClick={() => void localizar()}><LocateFixed size={22} /></button><button className="icono isla" aria-label="Recentrar mapa" onClick={() => setRecentro(v => v + 1)}><MapPin size={21}/></button></div>
@@ -119,18 +147,37 @@ export function App({ clerkConfigurado, tema, temaResuelto = 'light' }: { clerkC
         </section>
       </div>
     </div>
-    <div hidden={tab !== 'cuenta'}>{cuentaMontada && <Cuenta configurada={clerkConfigurado} tema={tema} temaMapa={temaResuelto} />}</div>
+    <div hidden={tab !== 'cuenta'}>{cuentaMontada && <Cuenta configurada={clerkConfigurado} tema={tema} temaMapa={temaResuelto} alSincronizar={alSincronizar} />}</div>
     <div hidden={tab !== 'reportes'}>
       {reportesMontados && <Reportes
         configurada={clerkConfigurado}
         tema={temaResuelto}
         activo={tab === 'reportes'}
+        destinoAviso={reporteAviso?.clave === claveSesion ? reporteAviso ?? undefined : undefined}
         irCuenta={() => setTab('cuenta')}
         rutas={demo || datosMapa.demostracion ? [] : rutas.features.flatMap(({ properties }) =>
           properties.idPersistido ? [{ id: properties.idPersistido, nombre: properties.nombre }] : [])}
       />}
     </div>
+    <Avisos perfilSincronizado={!!claveSesion && perfilSincronizado === claveSesion} configurada={clerkConfigurado} cargandoSesion={cargandoSesion} sesion={sesion} activo={tab === 'avisos'}
+      online={online} onContadorCambio={publicarContador} irInicio={() => setTab('inicio')} irCuenta={() => setTab('cuenta')}
+      abrirReporte={id => { if (sesion) { setReporteAviso({ clave: sesion.clave, id }); setTab('reportes'); } }}
+      rutaDisponible={rutaDisponible} abrirRuta={id => {
+        if (rutaDisponible(id)) { setSeleccion(id); setExpandido(true); setTab('inicio'); }
+      }} />
     {error && <div className="aviso-flotante" role="alert"><p>{error}</p><button className="icono" aria-label="Cerrar aviso" onClick={() => setError(null)}><X size={18}/></button></div>}
-    <nav className="navegacion isla" aria-label="Navegación principal">{tabs.map(({ id, texto, Icono }) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if (id === 'rutas') setExpandido(true); }}><Icono size={21}/><span>{texto}</span></button>)}</nav>
+    <nav className="navegacion isla" aria-label="Navegación principal">{tabs.map(({ id, texto, Icono }) => (
+      <button key={id} aria-current={tab === id ? 'page' : undefined}
+        aria-label={id === 'avisos' && avisosSinLeer > 0 ? `Avisos, ${avisosSinLeer > 99 ? '99+' : avisosSinLeer} sin leer` : undefined}
+        onClick={() => setTab(id)}>
+        <Icono size={21} />
+        {id === 'avisos' && avisosSinLeer > 0 && (
+          <span className="avisos-contador-nav" aria-hidden="true">
+            {avisosSinLeer > 99 ? '99+' : avisosSinLeer}
+          </span>
+        )}
+        <span>{texto}</span>
+      </button>
+    ))}</nav>
   </main>;
 }
