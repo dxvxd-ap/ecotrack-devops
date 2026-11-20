@@ -73,6 +73,19 @@ export default function DisenoDashboard({
             </Link>
 
             <Link
+              href="/dashboard/rastreo"
+              className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span>Rastreo en Vivo</span>
+              </div>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                GPS
+              </span>
+            </Link>
+
+            <Link
               href="/dashboard/rutas"
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/70 transition-colors"
             >
