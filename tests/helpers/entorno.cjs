@@ -113,7 +113,7 @@ function entorno(rol = 'superadmin', opciones = {}) {
       throw Error(`Dependencia externa no permitida en prueba: ${name}`);
     };
     vm.runInNewContext('(function(require,module,exports){' + code + '\n})',
-      { process: {env: opciones.env || {}, cwd: () => root}, console: opciones.console || {log(){},warn(){},error(){}}, Response, URL, Date, Set, Map, TextDecoder })(req,module,module.exports);
+      { process: {env: opciones.env || {}, cwd: () => root}, console: opciones.console || {log(){},warn(){},error(){}}, Response, URL, Date, Set, Map, TextDecoder, TextEncoder, crypto })(req,module,module.exports);
     return module.exports;
   }
   return { state, actor, target, load,

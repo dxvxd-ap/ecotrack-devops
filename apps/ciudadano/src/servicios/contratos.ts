@@ -19,6 +19,7 @@ export interface ColeccionRutas {
     geometry: GeometriaRuta;
     properties: {
       id: string;
+      idPersistido?: string;
       nombre: string;
       color: string;
       descripcion?: string;
@@ -38,7 +39,8 @@ export function configurar({ android, api = '' }: { android: boolean; api?: stri
   if (!api && !android) return { api: '' };
   let url: URL;
   try { url = new URL(api); } catch { throw new Error('Configura una API HTTPS absoluta.'); }
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  const local = (typeof __PERMITIR_API_LOOPBACK__ === 'undefined' || __PERMITIR_API_LOOPBACK__) &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && (android || !local || url.protocol !== 'http:')) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new Error('La API requiere un origen HTTPS sin credenciales, ruta ni parámetros.');
   }
@@ -75,8 +77,10 @@ export function normalizarRutas(respuesta: unknown): ColeccionRutas {
     if (!objeto(r) || r.activa === false || !objeto(r.trazado_geojson)) continue;
     const g = r.trazado_geojson;
     if (!(g.type === 'LineString' && lineaValida(g.coordinates)) && !(g.type === 'MultiLineString' && Array.isArray(g.coordinates) && g.coordinates.length > 0 && g.coordinates.every(lineaValida))) continue;
+    const idPersistido = typeof r._id === 'string' && /^[a-f\d]{24}$/i.test(r._id) ? r._id : null;
     features.push({ type: 'Feature', geometry: { type: g.type as GeometriaRuta['type'], coordinates: g.coordinates as GeometriaRuta['coordinates'] }, properties: {
       id: String(r._id ?? r.id_ruta ?? features.length), nombre: typeof r.nombre === 'string' ? r.nombre : 'Ruta municipal',
+      ...(idPersistido ? { idPersistido } : {}),
       color: typeof r.color_mapa === 'string' && /^#[\da-f]{6}$/i.test(r.color_mapa) ? r.color_mapa : '#059669',
       descripcion: typeof r.descripcion === 'string' ? r.descripcion : '',
       distanciaKm: typeof r.distancia_estimada_km === 'number' && Number.isFinite(r.distancia_estimada_km) && r.distancia_estimada_km > 0 ? r.distancia_estimada_km : null,

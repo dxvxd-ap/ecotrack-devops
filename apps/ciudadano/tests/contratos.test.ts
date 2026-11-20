@@ -45,3 +45,16 @@ test('normaliza horario habitual soportando camelCase, snake_case y fallback por
   assert.deepEqual(rutas.features[1].properties.horarioHabitual, { horaInicio: '06:30', horaFin: '12:30' });
   assert.deepEqual(rutas.features[2].properties.horarioHabitual, { horaInicio: '07:00', horaFin: '13:00' });
 });
+
+test('solo un _id de API válido identifica una ruta persistida', () => {
+  const id = '0123456789abcdef01234567';
+  const trazado_geojson = { type: 'LineString', coordinates: [[-97,20],[-96,21]] };
+  const { features } = normalizarRutas({ exito: true, datos: [
+    { _id: id, trazado_geojson },
+    { id_ruta: id, trazado_geojson },
+    { _id: 'inválido', trazado_geojson },
+    { trazado_geojson },
+  ] });
+  assert.deepEqual(features.map(({ properties }) => properties.idPersistido), [id, undefined, undefined, undefined]);
+  assert.deepEqual(features.map(({ properties }) => properties.id), [id, id, 'inválido', '3']);
+});

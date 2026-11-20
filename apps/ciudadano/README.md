@@ -24,7 +24,7 @@ Abrir `http://localhost:5173/eco/index.html`. `.env.local` se crea una vez, sin 
 - `VITE_DEV_API_ORIGIN`: proxy de desarrollo y preview al backend existente. Vacío usa `http://127.0.0.1:3000`. Configurar el origen realmente activo; no iniciar otro backend sobre un servicio existente. Solo se permite HTTP para localhost y HTTPS para hosts remotos.
 - `VITE_API_ORIGIN`: vacío para PWA del mismo origen. Para Android y API real se requiere un origen HTTPS absoluto; todavía deben validarse CORS y sesión en APK.
 
-Las rutas se consultan automáticamente con GET `/api/rutas`. Toca el panel inferior o la pestaña Rutas para seleccionar y consultar detalles. En producción/PWA y APK no se muestra ningún control de demostración. Para desarrollo local, habilitar explícitamente `VITE_ENABLE_DEV_TOOLS=true` con `npm run dev` o `npm run dev:https`; incluso así, la aplicación abre con rutas reales y requiere pulsar **Ver demostración**. Salir de demo hace otro GET y retira todos los datos simulados. Un error de API nunca activa demo.
+Las rutas se consultan automáticamente con GET `/api/rutas`. Abre el panel inferior de Inicio para seleccionar y consultar detalles. En producción/PWA y APK no se muestra ningún control de demostración. Para desarrollo local, habilitar explícitamente `VITE_ENABLE_DEV_TOOLS=true` con `npm run dev` o `npm run dev:https`; incluso así, la aplicación abre con rutas reales y requiere pulsar **Ver demostración**. Salir de demo hace otro GET y retira todos los datos simulados. Un error de API nunca activa demo.
 
 ## Verificación
 
@@ -35,7 +35,7 @@ npm run build
 npm run test:browser
 ```
 
-La prueba de navegador usa Google Chrome ya instalado en macOS. En otro equipo indicar `CHROME_BIN`. La preview es un proceso de prueba propio; no modifica el servidor existente. Para observar manualmente el build: `npm run preview`, abrir `http://localhost:4173/eco/index.html`. Service worker desactivado en desarrollo; comprobarlo en preview/build.
+La prueba de navegador usa Google Chrome ya instalado en macOS. En otro equipo indicar `CHROME_BIN`. La preview es un proceso de prueba propio; no modifica el servidor existente. Para observar manualmente el build: `npm run preview`, abrir `http://localhost:4173/`. Para probar la salida bajo el prefijo, ejecutar `npm run build:eco` y `npm run preview:eco`. Service worker desactivado en desarrollo; comprobarlo en preview/build.
 
 La prueba de navegador intercepta la API con fixtures explícitos. Para ejecutarla sin red cartográfica se puede usar `ECOTRACK_SMOKE_FIXTURES=1 npm run test:browser`: en ese modo el fondo es un fixture, nunca acredita calles reales. En esta sesión el servidor de preview no pudo abrirse por `EPERM`; no se afirma que la prueba visual haya pasado.
 
@@ -52,7 +52,7 @@ El usuario reportó posteriormente advertencia de certificado o «No seguro». *
 3. Con Mac y iPhone en la misma Wi-Fi y el backend realmente accesible, ejecutar:
 
 ```sh
-npm run build
+npm run build:eco
 npm run preview:https
 ```
 
@@ -62,10 +62,30 @@ Para desarrollo con recarga: `npm run dev:https`, URL `https://192.168.1.69:5443
 
 En otra Mac, la primera generación es `npm run https:prepare -- <IP-LAN>`. No ejecutarlo sobre certificados existentes: el script se detiene para conservarlos. Si cambia la IP actual, hay que preparar otro certificado con SAN correcto, conservando los anteriores; no continuar con advertencias TLS. Las claves están ignoradas por Git y bloqueadas por el servidor Vite, al igual que `.env` y `.git`.
 
+## Vercel independiente
+
+1. En tu cuenta de Vercel, importa el repositorio y selecciona la rama autorizada que contenga estos cambios.
+2. Configura **Root Directory** como `apps/ciudadano` y habilita **Include source files outside of the Root Directory** para incluir los tipos compartidos del monorepo.
+3. Usa el preset **Vite** y Node.js **22.x** (22.18 o posterior). `vercel.json` fija `npm ci`, `npm run build` y salida `dist`. El rewrite publica la API bajo el mismo origen de la PWA.
+4. Configura las variables públicas descritas abajo. Antes de habilitar acceso ciudadano, confirma el dominio definitivo y los retornos con la persona administradora de la instancia Clerk del backend.
+5. Cuando se autorice publicar, pulsa **Deploy**. La URL del despliegue aparece en **Deployments** y el dominio estable en **Domains**. Comprueba primero `/`, el manifest, `/sw.js` y una lectura no mutante como `GET /api/rutas`. Valida el acceso Clerk solo con una cuenta autorizada para pruebas.
+
+| Variable | Valor en Vercel |
+|---|---|
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clave **pública** de la misma instancia y entorno Clerk que valida el backend. Requerida para iniciar sesión. |
+| `VITE_API_ORIGIN` | Omitir o dejar vacía. La PWA llama a rutas relativas `/api/…`. |
+| `VITE_CLERK_SATELLITE_DOMAIN` | Opcional. Nombre de host sin esquema, solo si el dominio ya está configurado como satélite de esa instancia. |
+| `VITE_CLERK_SIGN_IN_URL`, `VITE_CLERK_SIGN_UP_URL` | Solo para el modo satélite cuando la configuración de Clerk las requiere. URLs HTTPS de acceso y registro en el sitio primario. |
+| `VITE_MAP_STYLE_URL` | Opcional. URL HTTPS pública del estilo cartográfico. Omitir para OpenFreeMap. |
+
+No crear una segunda instancia Clerk. El dominio de la PWA debe estar admitido por la instancia existente y su configuración de redirecciones. Si necesita un satélite en producción, coordina dominio propio, DNS y retornos con la administración de Clerk antes de publicar. Autoriza el origen HTTPS definitivo y el retorno a `/`. Las URL Preview solo pueden usar login si también están admitidas. No configurar claves secretas, URI de MongoDB, `VITE_DEV_API_ORIGIN` ni `VITE_ENABLE_DEV_TOOLS` en Vercel.
+
+La aplicación usa pestañas internas y Clerk con navegación por hash. El hosting sirve `/` y archivos estáticos; no hay catch-all. El service worker solo aplica fallback a `/` o `/index.html`. Las solicitudes API y Clerk no se almacenan en Workbox. Ejecuta `npm run test:vercel` para comprobar el build de prueba, proxy local y actualización del service worker con dobles. Eso no verifica la red de Vercel ni la instancia Clerk real.
+
 ## Publicación prevista bajo /eco/
 
 ```sh
-npm run build
+npm run build:eco
 npm run stage:web
 ```
 

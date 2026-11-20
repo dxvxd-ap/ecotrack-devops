@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloReclamo } from "@/modelos/Reclamo";
-import { identidad_autenticada, estado_cuenta } from "@/lib/autorizacion";
+import { autorizar_administracion } from "@/lib/autorizacion";
 import { manejarErrorApi } from "@/lib/apiErrorHandler";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const usuario = await identidad_autenticada();
-    await estado_cuenta(usuario);
+    await autorizar_administracion("reclamos:gestionar");
     await conectar_base_datos();
 
     const { id } = await params;
@@ -73,23 +72,44 @@ export async function PATCH(
       );
     }
 
-    const reclamoActualizado = await ModeloReclamo.findByIdAndUpdate(
-      id,
+    // Un histórico atendido por R1 también queda protegido, aunque no tenga contrato de creación.
+    const reclamoActualizado = await ModeloReclamo.findOneAndUpdate(
+      {
+        _id: id,
+        contrato_creacion: { $exists: false },
+        version_atencion: { $exists: false },
+        historial_atencion: { $exists: false },
+        operacion: { $exists: false },
+        respuesta_publica: { $exists: false },
+      },
       { $set: actualizaciones },
       { new: true, runValidators: true }
     );
 
     if (!reclamoActualizado) {
+      if (await ModeloReclamo.exists({ _id: id })) {
+        return NextResponse.json(
+          { exito: false, codigo: "RECLAMO_REQUIERE_R1", mensaje: "Gestiona este reclamo mediante las atenciones R1." },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         { exito: false, mensaje: "No se encontró el reclamo especificado." },
         { status: 404 }
       );
     }
 
+    const nota = reclamoActualizado.solucion_notas ?? "";
     return NextResponse.json({
       exito: true,
       mensaje: "Reclamo ciudadano actualizado exitosamente.",
-      datos: reclamoActualizado,
+      datos: {
+        _id: String(reclamoActualizado._id),
+        estado: reclamoActualizado.estado,
+        fecha_resolucion: reclamoActualizado.fecha_resolucion ?? null,
+        solucion_notas: nota,
+        notasAdmin: nota,
+      },
     });
   } catch (error: unknown) {
     return manejarErrorApi(error, "reclamos:actualizar");

@@ -71,8 +71,9 @@ function renderConTemaPreaplicado(tema: Tema) {
 
   const key = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
   const configured = !!key && /^pk_(test|live)_[A-Za-z0-9+/=]+$/.test(key);
-  const basePath = import.meta.env.BASE_URL || '/eco/';
-  const redirectUrl = `${location.origin}${basePath}index.html`;
+  const basePath = import.meta.env.BASE_URL;
+  const redirectUrl = new URL(basePath === '/' ? '/' : basePath + 'index.html', location.origin).href;
+  const satelliteDomain = import.meta.env.VITE_CLERK_SATELLITE_DOMAIN?.trim();
 
   const clerkAppearance = {
     variables: {
@@ -108,6 +109,13 @@ function renderConTemaPreaplicado(tema: Tema) {
           <ClerkProvider
             publishableKey={key!}
             appearance={clerkAppearance}
+            allowedRedirectOrigins={[location.origin]}
+            {...(satelliteDomain && {
+              isSatellite: true,
+              domain: satelliteDomain,
+              signInUrl: import.meta.env.VITE_CLERK_SIGN_IN_URL?.trim() || undefined,
+              signUpUrl: import.meta.env.VITE_CLERK_SIGN_UP_URL?.trim() || undefined,
+            })}
             signInFallbackRedirectUrl={redirectUrl}
             signUpFallbackRedirectUrl={redirectUrl}
           >

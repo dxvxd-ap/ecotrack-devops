@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
+import { ESTADOS_RECLAMO, type EstadoReclamo } from "@/contratos/reclamos";
+import { validarAtencion, validarTransicion, type AccionAtencion } from "@/contratos/reclamos_admin";
 import Skeleton from "react-loading-skeleton";
 import {
   AlertTriangle,
@@ -104,7 +107,223 @@ interface MetricasResumen {
   };
 }
 
+type AtencionPendiente = { clave: string; cuerpo: string; estado: EstadoReclamo; version: number };
+type DetalleGestion = { estado: EstadoReclamo; version: number; historialCompleto: boolean };
+
+const etiquetasEstado: Record<EstadoReclamo, string> = {
+  PENDIENTE: "Pendiente", EN_REVISION: "En revisión", ATENDIDO: "Atendido", RECHAZADO: "Rechazado",
+};
+
+function ModalAtencionR1({ id, usuario, sesion, pendientes, bloquear, alGuardar }: {
+  id: string; usuario: string; sesion: string; pendientes: Map<string, AtencionPendiente>;
+  bloquear: (bloqueado: boolean) => void; alGuardar: () => void;
+}) {
+  const { getToken } = useAuth();
+  const destino = "/api/v1/admin/reclamos/" + id;
+  const claveLocal = JSON.stringify([usuario, id]);
+  const [detalle, setDetalle] = useState<DetalleGestion | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [intento, setIntento] = useState(0);
+  const [revision, setRevision] = useState(false);
+  const [accion, setAccion] = useState<AccionAtencion>("CAMBIAR_ESTADO");
+  const [estado, setEstado] = useState<EstadoReclamo | "">("");
+  const [publica, setPublica] = useState("");
+  const [privada, setPrivada] = useState("");
+  const [error, setError] = useState("");
+  const [errorDetalle, setErrorDetalle] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [pendiente, setPendiente] = useState(() => pendientes.get(claveLocal));
+  const activa = useRef(false);
+  const enCurso = useRef(false);
+
+  useLayoutEffect(() => {
+    activa.current = true;
+    bloquear(pendientes.has(claveLocal));
+    return () => { activa.current = false; bloquear(false); };
+  }, [bloquear, claveLocal, pendientes]);
+
+  useEffect(() => {
+    const control = new AbortController();
+    setCargando(true);
+    setDetalle(null);
+    setErrorDetalle("");
+    void (async () => {
+      try {
+        const token = await getToken();
+        if (control.signal.aborted) return;
+        if (!token) throw new Error("La sesión no está disponible.");
+        const r = await fetch(destino, {
+          credentials: "omit", cache: "no-store", signal: control.signal,
+          headers: { Authorization: "Bearer " + token, "EcoTrack-Contrato": "reclamos-r1" },
+        });
+        const { exito, datos } = await r.json();
+        if (control.signal.aborted) return;
+        if (!r.ok || exito !== true || datos?.id !== id || !Number.isSafeInteger(datos.version) || datos.version < 0)
+          throw new Error("No se pudo verificar la versión del reclamo.");
+        if (!ESTADOS_RECLAMO.includes(datos.estado)) {
+          setErrorDetalle("Este reclamo histórico tiene un estado fuera del catálogo R1. Requiere una migración revisada antes de gestionarlo.");
+          return;
+        }
+        setDetalle({ estado: datos.estado, version: datos.version, historialCompleto: Array.isArray(datos.historial) && datos.historial.length >= 500 });
+      } catch (e) {
+        if (!control.signal.aborted) setErrorDetalle(e instanceof Error ? e.message : "No se pudo cargar el reclamo.");
+      } finally {
+        if (!control.signal.aborted) setCargando(false);
+      }
+    })();
+    return () => control.abort();
+  }, [destino, getToken, id, intento, sesion]);
+
+  const permite = (accion: AccionAtencion, estado?: EstadoReclamo) => {
+    if (!detalle) return false;
+    try { validarTransicion(detalle.estado, { accion, estado, version: detalle.version }); return true; }
+    catch { return false; }
+  };
+  const estados = ESTADOS_RECLAMO.filter(valor => permite("CAMBIAR_ESTADO", valor));
+  const acciones: AccionAtencion[] = detalle && !detalle.historialCompleto ? [
+    ...(estados.length ? ["CAMBIAR_ESTADO" as const] : []),
+    ...(permite("RESPONDER") ? ["RESPONDER" as const] : []),
+    "AGREGAR_NOTA",
+  ] : [];
+  const borrador = () => {
+    if (!detalle || !acciones.includes(accion)) throw new Error("Selecciona una acción disponible.");
+    const datos = validarAtencion({
+      accion, version: detalle.version,
+      ...(accion === "CAMBIAR_ESTADO" ? { estado } : {}),
+      ...(accion !== "AGREGAR_NOTA" && publica.trim() ? { respuesta_publica: publica } : {}),
+      ...(accion !== "RESPONDER" && privada.trim() ? { nota_interna: privada } : {}),
+    });
+    return { cuerpo: JSON.stringify(datos), version: detalle.version, estado: datos.estado ?? detalle.estado };
+  };
+  let formularioValido = false;
+  try { borrador(); formularioValido = accion !== "CAMBIAR_ESTADO" || estados.some(valor => valor === estado); }
+  catch { /* El contrato indica qué datos faltan. */ }
+
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault();
+    if (enCurso.current || !activa.current) return;
+    let operacion = pendientes.get(claveLocal);
+    const verificandoResultadoAnterior = Boolean(operacion);
+    if (!operacion) {
+      if (revision || !formularioValido) return;
+      operacion = { ...borrador(), clave: crypto.randomUUID() };
+      pendientes.set(claveLocal, operacion);
+    }
+    enCurso.current = true;
+    bloquear(true);
+    setOcupado(true);
+    setError("");
+    try {
+      const token = await getToken();
+      if (!activa.current) return;
+      if (!token) throw new Error("No se pudo verificar la sesión. La operación se conserva para reintentar.");
+      const r = await fetch(destino + "/atenciones", {
+        method: "POST", credentials: "omit", signal: AbortSignal.timeout(15000),
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json",
+          "EcoTrack-Contrato": "reclamos-r1", "Idempotency-Key": operacion.clave },
+        body: operacion.cuerpo,
+      });
+      const datos = await r.json();
+      if (!activa.current) return;
+      const resultado = datos?.datos;
+      if ((r.status === 200 || r.status === 201) && datos.exito === true && resultado?.reclamo_id === id &&
+        resultado.version === operacion.version + 1 && resultado.estado === operacion.estado &&
+        typeof resultado.evento_id === "string" && resultado.evento_id.length > 0) {
+        pendientes.delete(claveLocal);
+        bloquear(false);
+        alGuardar();
+        return;
+      }
+      if (r.status === 409 && datos.exito === false) {
+        const mensajes: Record<string, string> = {
+          VERSION_DESACTUALIZADA: "Otra atención cambió el reclamo. Revisa el estado y tu borrador antes de volver a enviar.",
+          TRANSICION_NO_PERMITIDA: "La acción ya no está permitida. Revisa el estado actual y tu borrador.",
+          CLAVE_REUTILIZADA: "La clave ya corresponde a otra atención. Revisa el detalle antes de iniciar otra operación.",
+          HISTORIAL_COMPLETO: "El historial alcanzó su límite. No se registró la atención.",
+        };
+        if (Object.hasOwn(mensajes, datos.codigo)) {
+          pendientes.delete(claveLocal);
+          setPendiente(undefined);
+          bloquear(false);
+          setRevision(true);
+          setIntento(valor => valor + 1);
+          setError(mensajes[datos.codigo]);
+          return;
+        }
+      }
+      // Un rechazo previo a la escritura libera solo una operación nueva.
+      // Si hubo incertidumbre, un rechazo de sesión no aclara el intento anterior.
+      if (!verificandoResultadoAnterior && datos.exito === false &&
+        [400, 401, 403, 404, 413, 415].includes(r.status)) {
+        pendientes.delete(claveLocal);
+        bloquear(false);
+        setError(typeof datos.mensaje === "string" ? datos.mensaje : "La atención fue rechazada.");
+        return;
+      }
+      if (r.status === 503 && datos.codigo === "RESULTADO_INCIERTO")
+        throw new Error("El servidor no pudo confirmar la atención. Reintenta la misma operación.");
+      throw new Error("No se confirmó la atención. Reintenta con la misma operación cuando la sesión y el servicio estén disponibles.");
+    } catch (e) {
+      if (activa.current) {
+        setPendiente(operacion);
+        setError(e instanceof Error ? e.message : "No se confirmó la atención. Reintenta la misma operación.");
+      }
+    } finally {
+      enCurso.current = false;
+      if (activa.current) setOcupado(false);
+    }
+  }
+
+  return <form onSubmit={enviar} className="space-y-3 text-sm">
+    {cargando && <p role="status">Cargando estado y versión del reclamo…</p>}
+    {detalle && <p>{etiquetasEstado[detalle.estado]} · Versión {detalle.version}</p>}
+    {errorDetalle && <><p role="alert">{errorDetalle}</p><button type="button" onClick={() => setIntento(v => v + 1)}>Volver a consultar</button></>}
+    {error && <p role="alert">{error}</p>}
+    {detalle?.historialCompleto && <p role="status">El historial alcanzó su límite de atenciones.</p>}
+    {revision && detalle && !detalle.historialCompleto &&
+      <button type="button" onClick={() => setRevision(false)}>He revisado la versión y mi borrador</button>}
+    {detalle && !pendiente && acciones.length > 0 &&
+      <fieldset disabled={ocupado} className="space-y-3">
+        <label className="block">Acción
+          <select className="block w-full bg-zinc-800" value={acciones.includes(accion) ? accion : ""} onChange={e => setAccion(e.target.value as AccionAtencion)}>
+            <option value="" disabled>Selecciona una acción</option>
+            {acciones.includes("CAMBIAR_ESTADO") && <option value="CAMBIAR_ESTADO">Cambiar estado</option>}
+            {acciones.includes("RESPONDER") && <option value="RESPONDER">Responder al ciudadano</option>}
+            <option value="AGREGAR_NOTA">Agregar nota privada</option>
+          </select>
+        </label>
+        {accion === "CAMBIAR_ESTADO" && estados.length > 0 && <label className="block">Nuevo estado
+          <select className="block w-full bg-zinc-800" value={estados.some(valor => valor === estado) ? estado : ""} onChange={e => setEstado(e.target.value as EstadoReclamo)}>
+            <option value="" disabled>Selecciona un estado</option>
+            {estados.map(valor => <option key={valor} value={valor}>{etiquetasEstado[valor]}</option>)}
+          </select>
+        </label>}
+        {accion !== "AGREGAR_NOTA" && acciones.includes(accion) && <label className="block">Respuesta pública al ciudadano
+          <textarea className="block w-full bg-zinc-800" value={publica} onChange={e => setPublica(e.target.value)} />
+          <span className="text-xs">De 10 a 4000 caracteres. Obligatoria al responder o cerrar.</span>
+        </label>}
+        {accion !== "RESPONDER" && acciones.includes(accion) && <label className="block">Nota administrativa privada
+          <textarea className="block w-full bg-zinc-800" value={privada} onChange={e => setPrivada(e.target.value)} />
+          <span className="text-xs">Hasta 2000 caracteres.</span>
+        </label>}
+      </fieldset>}
+    {pendiente && <p role="status">Conservamos la clave y el contenido. Confirma el resultado antes de cerrar.</p>}
+    <button type="submit" disabled={ocupado || (!pendiente && (!formularioValido || revision))}
+      className="rounded-lg bg-emerald-600 px-4 py-2 disabled:opacity-50">
+      {ocupado ? "Guardando…" : pendiente ? "Reintentar la misma atención" : "Guardar atención"}
+    </button>
+  </form>;
+}
+
 export default function PaginaGestionReportes() {
+  const { userId, sessionId } = useAuth();
+  const operacionesR1 = useRef(new Map<string, AtencionPendiente>());
+  const bloqueoR1 = useRef(false);
+  const [bloqueadoR1, setBloqueadoR1] = useState(false);
+  const bloquearR1 = useCallback((valor: boolean) => {
+    bloqueoR1.current = valor;
+    setBloqueadoR1(valor);
+  }, []);
   // Pestaña principal: "ciudadanos" o "conductores"
   const [pestanaActiva, fijarPestanaActiva] = useState<"ciudadanos" | "conductores">("ciudadanos");
 
@@ -245,7 +464,12 @@ export default function PaginaGestionReportes() {
   }, [itemsActivos, filtroEstado, busqueda]);
 
   // Abrir modal de gestión
+  const cerrarModalGestion = () => {
+    if (!bloqueoR1.current) fijarItemSeleccionado(null);
+  };
+
   const abrirModalGestion = (item: ItemIncidencia) => {
+    if (bloqueoR1.current) return;
     fijarItemSeleccionado(item);
     const est = normalizarEstado(item.estado);
     fijarNuevoEstado(est === "pendiente" ? "en_proceso" : est);
@@ -255,27 +479,13 @@ export default function PaginaGestionReportes() {
   // Guardar cambios en el reporte o reclamo
   const guardarGestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!itemSeleccionado) return;
+    if (!itemSeleccionado || itemSeleccionado.origen !== "conductor") return;
 
     try {
       fijarGuardando(true);
       fijarMensajeExito("");
-
-      const esCiudadano = itemSeleccionado.origen === "ciudadano";
-      const url = esCiudadano
-        ? `/api/reclamos/${itemSeleccionado._id}`
-        : `/api/reportes/${itemSeleccionado._id}`;
-
-      // Payload adaptado al modelo correspondiente
-      const payload = esCiudadano
-        ? {
-            estado: nuevoEstado === "resuelto" ? "ATENDIDO" : nuevoEstado === "en_proceso" ? "EN_REVISION" : "PENDIENTE",
-            solucion_notas: notasResolucion,
-          }
-        : {
-            estado: nuevoEstado,
-            notasAdmin: notasResolucion,
-          };
+      const url = `/api/reportes/${itemSeleccionado._id}`;
+      const payload = { estado: nuevoEstado, notasAdmin: notasResolucion };
 
       const res = await fetch(url, {
         method: "PATCH",
@@ -827,7 +1037,9 @@ export default function PaginaGestionReportes() {
               </div>
               <button
                 type="button"
-                onClick={() => fijarItemSeleccionado(null)}
+                onClick={cerrarModalGestion}
+                disabled={bloqueadoR1}
+                aria-label="Cerrar gestión"
                 className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -840,7 +1052,7 @@ export default function PaginaGestionReportes() {
                 <span>{mensajeExito}</span>
               </div>
             ) : (
-              <form onSubmit={guardarGestion} className="space-y-4 text-xs font-sans">
+              <div className="space-y-4 text-xs font-sans">
                 {/* Evidencia Fotográfica Sanitizada (rechaza protocolos locales como file://) */}
                 {itemSeleccionado.origen === "ciudadano" && (
                   <div>
@@ -874,6 +1086,14 @@ export default function PaginaGestionReportes() {
                   </div>
                 )}
 
+                {itemSeleccionado.origen === "ciudadano" ? (
+                  userId && sessionId ? <ModalAtencionR1
+                    key={JSON.stringify([userId, sessionId, itemSeleccionado._id])}
+                    id={itemSeleccionado._id} usuario={userId} sesion={sessionId}
+                    pendientes={operacionesR1.current} bloquear={bloquearR1}
+                    alGuardar={() => { fijarItemSeleccionado(null); void cargarTodo(true); }}
+                  /> : <p role="status">Inicia sesión para gestionar el reclamo.</p>
+                ) : <form onSubmit={guardarGestion} className="space-y-4">
                 <div>
                   <label className="block text-zinc-400 font-mono mb-1">CAMBIAR ESTADO</label>
                   <select
@@ -918,7 +1138,8 @@ export default function PaginaGestionReportes() {
                     <span>{guardando ? "Guardando..." : "Guardar Cambios"}</span>
                   </button>
                 </div>
-              </form>
+              </form>}
+              </div>
             )}
           </div>
         </div>

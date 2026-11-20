@@ -2,13 +2,13 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 
-const url = 'http://127.0.0.1:4173/eco/index.html';
 const fixtures = process.env.ECOTRACK_SMOKE_FIXTURES === '1';
 const development = process.env.ECOTRACK_SMOKE_DEV === '1';
+const url = 'http://127.0.0.1:4173' + (development ? '/eco/index.html' : '/');
 let occupied = false;
 try { await fetch(url); occupied = true; } catch { /* sin servidor */ }
 if (occupied) throw new Error('El puerto 4173 está ocupado. No se tocará el servicio existente.');
-const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', ...(!development ? ['preview'] : []), '--host', '127.0.0.1', '--port', '4173'], { stdio: 'ignore', env: { ...process.env, VITE_ENABLE_DEV_TOOLS: 'true' } });
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', ...(!development ? ['preview'] : []), '--configLoader', 'runner', '--host', '127.0.0.1', '--port', '4173'], { stdio: 'ignore', env: { ...process.env, VITE_ENABLE_DEV_TOOLS: 'true' } });
 let browser;
 try {
   let ready = false;
@@ -22,6 +22,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.name));
   if (fixtures) await page.route('https://tiles.openfreemap.org/**', route => route.fulfill({ json: { version: 8, sources: {}, layers: [{ id: 'fondo-prueba', type: 'background', paint: { 'background-color': '#e8eee9' } }] } }));
+  if (fixtures) await page.route('**/api/**', route => route.fulfill({ json: { exito: true, datos: null } }));
   let estado = 'ok';
   let consultasAPI = 0;
   await page.route('**/api/rutas', route => {
@@ -122,7 +123,7 @@ try {
     throw new Error('El canvas del mapa no tiene dimensiones válidas.');
   }
 
-  await page.getByRole('button', { name: 'Rutas', exact: true }).click();
+  await page.getByRole('button', { name: /Ver rutas y detalles/ }).click();
   await page.getByRole('button', { name: 'Norte (prueba)', exact: true }).click();
   if (await page.getByRole('button', { name: 'Norte (prueba)', exact: true }).getAttribute('aria-pressed') !== 'true') throw new Error('No se seleccionó la ruta.');
   await page.getByText('Martes (prueba)', { exact: true }).waitFor();
@@ -162,7 +163,7 @@ try {
     const link = document.querySelector('link[rel="manifest"]');
     return link ? (await fetch(link.href)).json() : null;
   });
-  if (!development && (pwa?.scope !== '/eco/' || pwa?.start_url !== '/eco/index.html')) throw new Error('Manifest fuera de ámbito /eco/.');
+  if (!development && (pwa?.scope !== '/' || pwa?.start_url !== '/')) throw new Error('Manifest fuera del ámbito raíz.');
   if (errors.length) throw new Error(`Errores JavaScript: ${errors.join(', ')}`);
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: fixtures ? 'artifacts/entrega2-fixtures.png' : 'artifacts/entrega2-cartografia.png', fullPage: true });
