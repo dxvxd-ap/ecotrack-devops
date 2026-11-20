@@ -8,10 +8,10 @@ try {
   // Ignorar si el entorno no permite modificar servidores DNS
 }
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 
 if (!MONGODB_URI) {
-  throw new Error("Por favor define la variable de entorno MONGODB_URI en .env.local");
+  throw new Error("Por favor define la variable de entorno MONGODB_URI (o MONGO_URI) en .env.local");
 }
 
 interface CacheMongoose {

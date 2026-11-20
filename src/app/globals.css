@@ -27,23 +27,7 @@ body {
   text-transform: uppercase;
 }
 
-.texto-mono {
-  font-family: var(--fuente-mono);
-}
 
-/* Efecto de letras gigantes detrás del camión (mix-blend-mode darken) */
-.letras-fondo-hero {
-  mix-blend-mode: darken;
-  user-select: none;
-  pointer-events: none;
-}
-
-/* Gradiente de texto de cobalto a blanco para las tarjetas del hero */
-.texto-revelado-gradiente {
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-}
 
 /* Personalización de controles de mapas de alto contraste */
 .leaflet-control-zoom a {

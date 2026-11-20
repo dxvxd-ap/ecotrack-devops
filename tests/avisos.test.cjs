@@ -6,18 +6,20 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 
 function cargar(ruta, dobles = {}, cache = new Map()) {
-  if (dobles[ruta]) return dobles[ruta];
-  if (cache.has(ruta)) return cache.get(ruta);
-  const archivo = path.join(root, 'src', ruta + '.ts');
+  const rutaNormalizada = ruta.replace(/\\/g, '/');
+  if (dobles[rutaNormalizada]) return dobles[rutaNormalizada];
+  if (cache.has(rutaNormalizada)) return cache.get(rutaNormalizada);
+  const archivo = path.join(root, 'src', rutaNormalizada + '.ts');
   const codigo = ts.transpileModule(fs.readFileSync(archivo, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }
   }).outputText;
   const modulo = { exports: {} };
-  cache.set(ruta, modulo.exports);
+  cache.set(rutaNormalizada, modulo.exports);
   new Function('require', 'module', 'exports', codigo)(nombre => {
-    if (dobles[nombre]) return dobles[nombre];
-    if (nombre.startsWith('@/')) return cargar(nombre.slice(2), dobles, cache);
-    if (nombre.startsWith('.')) return cargar(path.join(path.dirname(ruta), nombre), dobles, cache);
+    const nombreNormalizado = nombre.replace(/\\/g, '/');
+    if (dobles[nombreNormalizado]) return dobles[nombreNormalizado];
+    if (nombreNormalizado.startsWith('@/')) return cargar(nombreNormalizado.slice(2), dobles, cache);
+    if (nombreNormalizado.startsWith('.')) return cargar(path.join(path.dirname(rutaNormalizada), nombreNormalizado).replace(/\\/g, '/'), dobles, cache);
     return require(nombre);
   }, modulo, modulo.exports);
   return modulo.exports;
