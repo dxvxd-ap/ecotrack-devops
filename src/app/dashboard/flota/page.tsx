@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
+  Pencil,
+  X,
 } from "lucide-react";
 
 export default function PaginaGestionFlota() {
@@ -24,6 +26,20 @@ export default function PaginaGestionFlota() {
   const [simulando_gps, fijar_simulando_gps] = useState(false);
   const [notificacion, fijar_notificacion] = useState("");
 
+  // Modal y formulario de edición de camión
+  const [camion_a_editar, fijar_camion_a_editar] = useState<any | null>(null);
+  const [form_edicion, fijar_form_edicion] = useState({
+    id: "",
+    matricula: "",
+    numero_unidad: "",
+    modelo: "",
+    capacidad_toneladas: "8",
+    conductor_asignado_id: "",
+    estado: "disponible",
+    imei: "",
+  });
+  const [actualizando_camion, fijar_actualizando_camion] = useState(false);
+
   // Formularios
   const [form_camion, fijar_form_camion] = useState({
     matricula: "",
@@ -31,6 +47,7 @@ export default function PaginaGestionFlota() {
     modelo: "",
     capacidad_toneladas: "8",
     conductor_asignado_id: "",
+    imei: "",
   });
 
   const [form_conductor, fijar_form_conductor] = useState({
@@ -73,6 +90,44 @@ export default function PaginaGestionFlota() {
     cargar_datos();
   }, []);
 
+  const abrir_edicion = (c: any) => {
+    fijar_camion_a_editar(c);
+    fijar_form_edicion({
+      id: c._id,
+      matricula: c.matricula || "",
+      numero_unidad: c.numero_unidad || "",
+      modelo: c.modelo || "",
+      capacidad_toneladas: String(c.capacidad_toneladas || 8),
+      conductor_asignado_id: c.conductor_asignado_id?._id || c.conductor_asignado_id || "",
+      estado: c.estado || "disponible",
+      imei: c.imei || c.imei_gps || "",
+    });
+  };
+
+  const actualizar_camion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      fijar_actualizando_camion(true);
+      const res = await fetch("/api/camiones", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form_edicion),
+      });
+      const data = await res.json();
+      if (data.exito) {
+        fijar_camion_a_editar(null);
+        fijar_notificacion("Unidad de camión actualizada exitosamente.");
+        cargar_datos();
+      } else {
+        alert(data.mensaje || "Error al actualizar camión");
+      }
+    } catch (e) {
+      alert("Error de red");
+    } finally {
+      fijar_actualizando_camion(false);
+    }
+  };
+
   const registrar_camion = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -90,6 +145,7 @@ export default function PaginaGestionFlota() {
           modelo: "",
           capacidad_toneladas: "8",
           conductor_asignado_id: "",
+          imei: "",
         });
         fijar_notificacion("Unidad de camión agregada a la flota.");
         cargar_datos();
@@ -264,12 +320,40 @@ export default function PaginaGestionFlota() {
                     </strong>
                   </div>
 
-                  {c.ultima_latitud && (
-                    <div className="text-[10px] font-mono text-zinc-500 flex items-center justify-between pt-1">
-                      <span>GPS: [{c.ultima_latitud.toFixed(4)}, {c.ultima_longitud.toFixed(4)}]</span>
-                      <span className="text-blue-400">{c.ultima_velocidad_kmh} km/h</span>
-                    </div>
-                  )}
+                  <div className="p-2 bg-zinc-900/60 rounded border border-zinc-700/40 text-[11px] text-zinc-300 flex items-center justify-between">
+                    <span className="text-zinc-500 font-mono flex items-center gap-1.5">
+                      <Radio className="w-3 h-3 text-cyan-400" />
+                      <span>GPS (IMEI):</span>
+                    </span>
+                    {c.imei || c.imei_gps ? (
+                      <span className="font-mono text-emerald-400 font-semibold tracking-wider">
+                        {c.imei || c.imei_gps}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-zinc-500 text-[10px] italic">
+                        Sin GPS asignado
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    {c.ultima_latitud ? (
+                      <div className="text-[10px] font-mono text-zinc-500 flex items-center gap-2">
+                        <span>GPS: [{c.ultima_latitud.toFixed(4)}, {c.ultima_longitud.toFixed(4)}]</span>
+                        <span className="text-blue-400">{c.ultima_velocidad_kmh} km/h</span>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] font-mono text-zinc-600">Sin fix de ubicación</div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => abrir_edicion(c)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-700/40 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors text-[11px] font-mono border border-zinc-600/30"
+                    >
+                      <Pencil className="w-3 h-3 text-cyan-400" />
+                      <span>Editar</span>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -477,6 +561,28 @@ export default function PaginaGestionFlota() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-zinc-400 font-mono mb-1">
+                  IMEI DEL GPS (15 DÍGITOS)
+                </label>
+                <input
+                  type="text"
+                  value={form_camion.imei}
+                  onChange={(e) =>
+                    fijar_form_camion({
+                      ...form_camion,
+                      imei: e.target.value.replace(/\D/g, "").slice(0, 15),
+                    })
+                  }
+                  maxLength={15}
+                  placeholder="Ej. 869706062867504"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono"
+                />
+                <span className="text-[10px] text-zinc-500 font-mono mt-0.5 block">
+                  Identificador Coban TK303F para telemetría TCP en tiempo real.
+                </span>
+              </div>
+
               <button
                 type="submit"
                 disabled={guardando_camion}
@@ -552,6 +658,166 @@ export default function PaginaGestionFlota() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Edición de Camión */}
+      {camion_a_editar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest">
+                  Actualización de Unidad
+                </span>
+                <h3 className="texto-anton text-lg tracking-wide text-white mt-0.5">
+                  EDITAR {form_edicion.numero_unidad || "CAMIÓN"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => fijar_camion_a_editar(null)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={actualizar_camion} className="space-y-3.5 text-xs font-sans">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">NÚMERO DE UNIDAD</label>
+                  <input
+                    type="text"
+                    value={form_edicion.numero_unidad}
+                    onChange={(e) =>
+                      fijar_form_edicion({ ...form_edicion, numero_unidad: e.target.value })
+                    }
+                    required
+                    placeholder="Ej: UNIDAD-305"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">MATRÍCULA / PLACA</label>
+                  <input
+                    type="text"
+                    value={form_edicion.matricula}
+                    onChange={(e) =>
+                      fijar_form_edicion({ ...form_edicion, matricula: e.target.value })
+                    }
+                    required
+                    placeholder="Ej: ECO-305-CDMX"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono uppercase"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-mono mb-1">MODELO Y MARCA</label>
+                <input
+                  type="text"
+                  value={form_edicion.modelo}
+                  onChange={(e) =>
+                    fijar_form_edicion({ ...form_edicion, modelo: e.target.value })
+                  }
+                  required
+                  placeholder="Ej: International WorkStar Compactador"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-mono mb-1">
+                  IMEI DEL GPS (15 DÍGITOS)
+                </label>
+                <input
+                  type="text"
+                  value={form_edicion.imei}
+                  onChange={(e) =>
+                    fijar_form_edicion({
+                      ...form_edicion,
+                      imei: e.target.value.replace(/\D/g, "").slice(0, 15),
+                    })
+                  }
+                  maxLength={15}
+                  placeholder="Ej. 869706062867504"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono"
+                />
+                <span className="text-[10px] text-zinc-500 font-mono mt-0.5 block">
+                  Identificador físico Coban TK303F para rastreo satelital TCP.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">ESTADO OPERATIVO</label>
+                  <select
+                    value={form_edicion.estado}
+                    onChange={(e) =>
+                      fijar_form_edicion({ ...form_edicion, estado: e.target.value })
+                    }
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono"
+                  >
+                    <option value="disponible">Disponible (Base)</option>
+                    <option value="en_ruta">En ruta de recolección</option>
+                    <option value="en_mantenimiento">En mantenimiento</option>
+                    <option value="fuera_servicio">Fuera de servicio</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-zinc-400 font-mono mb-1">CAPACIDAD (TONS)</label>
+                  <input
+                    type="number"
+                    value={form_edicion.capacidad_toneladas}
+                    onChange={(e) =>
+                      fijar_form_edicion({ ...form_edicion, capacidad_toneladas: e.target.value })
+                    }
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-mono mb-1">ASIGNAR CONDUCTOR (1:1)</label>
+                <select
+                  value={form_edicion.conductor_asignado_id}
+                  onChange={(e) =>
+                    fijar_form_edicion({
+                      ...form_edicion,
+                      conductor_asignado_id: e.target.value,
+                    })
+                  }
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono"
+                >
+                  <option value="">-- Sin Conductor Asignado --</option>
+                  {conductores.map((cond) => (
+                    <option key={cond._id} value={cond._id}>
+                      {cond.nombre_completo} ({cond.numero_licencia})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => fijar_camion_a_editar(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-mono text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={actualizando_camion}
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-mono font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white transition-colors shadow-md"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{actualizando_camion ? "Guardando..." : "Guardar Cambios"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

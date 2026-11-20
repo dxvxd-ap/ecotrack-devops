@@ -3,6 +3,7 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export interface InterfazCamion extends Document {
   matricula: string;
   numero_unidad: string;
+  imei?: string;
   imei_gps?: string;
   modelo: string;
   capacidad_toneladas: number;
@@ -38,6 +39,12 @@ const EsquemaCamion = new Schema<InterfazCamion>(
       type: String,
       required: true,
       unique: true,
+      trim: true,
+    },
+    imei: {
+      type: String,
+      unique: true,
+      sparse: true,
       trim: true,
     },
     imei_gps: {
