@@ -8,10 +8,10 @@ import { ModeloBloqueoAdministrativo } from "@/modelos/BloqueoAdministrativo";
 export const ROLES_INFERIORES = ["secretario", "moderador", "ciudadano", "conductor", "camion"] as const;
 export const ROLES_CONOCIDOS: readonly string[] = ["superadmin", "admin", ...ROLES_INFERIORES];
 export type PermisoAdministrativo = "usuarios:ver" | "usuarios:gestionar" | "usuarios:eliminar" |
-  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver" | "rutas:gestionar" | "reclamos:ver" | "reclamos:gestionar";
+  "roles:ver" | "roles:crear" | "preasignaciones:gestionar" | "dashboard:ver" | "rutas:gestionar" | "reclamos:ver" | "reclamos:gestionar" | "avisos:gestionar";
 const PERMISOS: Record<string, readonly PermisoAdministrativo[]> = {
-  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar"],
-  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar"],
+  superadmin: ["usuarios:ver", "usuarios:gestionar", "usuarios:eliminar", "roles:ver", "roles:crear", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar", "avisos:gestionar"],
+  admin: ["usuarios:ver", "usuarios:gestionar", "roles:ver", "preasignaciones:gestionar", "dashboard:ver", "rutas:gestionar", "reclamos:ver", "reclamos:gestionar", "avisos:gestionar"],
   secretario: ["dashboard:ver"],
   moderador: ["dashboard:ver"],
 };
@@ -142,6 +142,7 @@ export async function autorizar_reclamos(): Promise<ActorAdministrativo> {
 
 export function permiso_api_administrativa(ruta: string, metodo: string): PermisoAdministrativo | null {
   const normalizada = ruta.replace(/\/+$/, "");
+  if (/^\/api\/v1\/admin\/avisos(?:\/[^/]+)?$/.test(normalizada) && ["GET", "POST", "PATCH", "HEAD"].includes(metodo)) return "avisos:gestionar";
   if (normalizada === "/api/rutas" && ["POST", "PUT", "DELETE"].includes(metodo)) return "rutas:gestionar";
   if (normalizada === "/api/usuarios/preasignar") return "preasignaciones:gestionar";
   if (normalizada === "/api/usuarios") return metodo === "GET" ? "usuarios:ver" : metodo === "DELETE" ? "usuarios:eliminar" : "usuarios:gestionar";
