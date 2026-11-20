@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Truck,
   MapPin,
@@ -16,6 +18,7 @@ import {
 } from "lucide-react";
 
 export default function PaginaResumenDashboard() {
+  const { isLoaded } = useAuth();
   const [cargando, fijar_cargando] = useState(true);
   const [resumen, fijar_resumen] = useState({
     total_rutas: 0,
@@ -27,23 +30,25 @@ export default function PaginaResumenDashboard() {
   const [asignaciones_recientes, fijar_asignaciones_recientes] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!isLoaded) return;
+
     // Sincronizar automáticamente usuario al ingresar al dashboard
-    fetch("/api/autenticacion/sincronizar", { method: "POST" }).catch(() => {});
+    clienteFetch("/api/autenticacion/sincronizar", { method: "POST" }).catch(() => {});
 
     async function cargar_metricas() {
       try {
         fijar_cargando(true);
-        const [resp_rutas, resp_camiones, resp_cal, resp_alertas] = await Promise.all([
-          fetch("/api/rutas").then((r) => r.json()).catch(() => ({ datos: [] })),
-          fetch("/api/camiones").then((r) => r.json()).catch(() => ({ datos: [] })),
-          fetch("/api/calendario").then((r) => r.json()).catch(() => ({ datos: [] })),
-          fetch("/api/alertas").then((r) => r.json()).catch(() => ({ datos: [] })),
+        const [resp_rutas, resp_camiones, resp_cal, resp_alertas] = await Promise.allSettled([
+          clienteFetch("/api/rutas"),
+          clienteFetch("/api/camiones"),
+          clienteFetch("/api/calendario"),
+          clienteFetch("/api/alertas"),
         ]);
 
-        const rutas = resp_rutas.datos || [];
-        const camiones = resp_camiones.datos || [];
-        const cal = resp_cal.datos || [];
-        const alertas = resp_alertas.datos || [];
+        const rutas = resp_rutas.status === "fulfilled" ? extraerLista(resp_rutas.value, "rutas") : [];
+        const camiones = resp_camiones.status === "fulfilled" ? extraerLista(resp_camiones.value, "camiones") : [];
+        const cal = resp_cal.status === "fulfilled" ? extraerLista(resp_cal.value, "calendario") : [];
+        const alertas = resp_alertas.status === "fulfilled" ? extraerLista(resp_alertas.value, "alertas") : [];
 
         const en_ruta = camiones.filter((c: any) => c.estado === "en_ruta").length;
 
@@ -64,7 +69,7 @@ export default function PaginaResumenDashboard() {
     }
 
     cargar_metricas();
-  }, []);
+  }, [isLoaded]);
 
   return (
     <div className="p-8 space-y-8 font-sans">

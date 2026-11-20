@@ -30,8 +30,36 @@ if (!en_cache) {
   en_cache = global.cache_mongoose = { conexion: null, promesa: null };
 }
 
+/**
+ * Registro explícito de todos los esquemas y modelos en el registro global de Mongoose.
+ * En entornos Serverless de Vercel (Next.js App Router lambdas), previene el error crítico:
+ * `MissingSchemaError: Schema hasn't been registered for model ...` al invocar `.populate()`.
+ */
+export function registrarModelosMongoose() {
+  require("@/modelos/Rol");
+  require("@/modelos/Usuario");
+  require("@/modelos/Camion");
+  require("@/modelos/Conductor");
+  require("@/modelos/Ruta");
+  require("@/modelos/AsignacionCalendario");
+  require("@/modelos/Reporte");
+  require("@/modelos/Reclamo");
+  require("@/modelos/Incidente");
+  require("@/modelos/Alerta");
+  require("@/modelos/AlertaCiudadano");
+  require("@/modelos/HistorialAlerta");
+  require("@/modelos/HistorialUbicacion");
+  require("@/modelos/Aviso");
+  require("@/modelos/LecturaAviso");
+  require("@/modelos/DomicilioCiudadano");
+  require("@/modelos/SuscripcionPush");
+  require("@/modelos/PreasignacionUsuario");
+  require("@/modelos/BloqueoAdministrativo");
+}
+
 export async function conectar_base_datos(): Promise<typeof mongoose> {
   if (en_cache?.conexion) {
+    registrarModelosMongoose();
     return en_cache.conexion;
   }
 
@@ -48,6 +76,7 @@ export async function conectar_base_datos(): Promise<typeof mongoose> {
 
   try {
     en_cache!.conexion = await en_cache!.promesa;
+    registrarModelosMongoose();
   } catch (error) {
     en_cache!.promesa = null;
     throw error;

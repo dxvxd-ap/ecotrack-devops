@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextResponse, NextRequest } from "next/server";
 import { conectar_base_datos } from "@/lib/base_datos";
 import { ModeloCamion } from "@/modelos/Camion";

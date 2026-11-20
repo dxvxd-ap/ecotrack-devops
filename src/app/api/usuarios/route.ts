@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextResponse, NextRequest } from "next/server";
 import {
   autorizar_administracion, cliente_clerk_administrativo, respuesta_error_administrativo,

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { autorizar_administracion } from '@/lib/autorizacion';
 import { idReclamo, validarAtencion, entradaInvalida } from '@/contratos/reclamos_admin';
 import { validarOperacionReclamo } from '@/contratos/reclamos';

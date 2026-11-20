@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import { ESTADOS_RECLAMO, type EstadoReclamo } from "@/contratos/reclamos";
 import { validarAtencion, validarTransicion, type AccionAtencion } from "@/contratos/reclamos_admin";
 import Skeleton from "react-loading-skeleton";
@@ -316,7 +317,7 @@ function ModalAtencionR1({ id, usuario, sesion, pendientes, bloquear, alGuardar 
 }
 
 export default function PaginaGestionReportes() {
-  const { userId, sessionId } = useAuth();
+  const { userId, sessionId, isLoaded } = useAuth();
   const operacionesR1 = useRef(new Map<string, AtencionPendiente>());
   const bloqueoR1 = useRef(false);
   const [bloqueadoR1, setBloqueadoR1] = useState(false);
@@ -355,43 +356,16 @@ export default function PaginaGestionReportes() {
       fijarErrorCarga(null);
 
       const [pReclamos, pReportes, pResumen] = await Promise.allSettled([
-        fetch("/api/reclamos?limite=100", {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
-        }).then(async (r) => {
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok || data.exito === false || data.ok === false) {
-            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
-          }
-          return data;
-        }),
-        fetch("/api/reportes?origen=conductor&limite=100", {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
-        }).then(async (r) => {
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok || data.exito === false || data.ok === false) {
-            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
-          }
-          return data;
-        }),
-        fetch("/api/reportes/resumen", {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache" },
-        }).then(async (r) => {
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok || data.exito === false || data.ok === false) {
-            throw new Error(data.mensaje || `Error HTTP ${r.status}`);
-          }
-          return data;
-        }),
+        clienteFetch("/api/reclamos?limite=100"),
+        clienteFetch("/api/reportes?origen=conductor&limite=100"),
+        clienteFetch("/api/reportes/resumen"),
       ]);
 
       const avisos: string[] = [];
 
       // Procesar Reclamos Ciudadanos independientemente
       if (pReclamos.status === "fulfilled") {
-        fijarReclamosCiudadanos(pReclamos.value.datos || []);
+        fijarReclamosCiudadanos(extraerLista(pReclamos.value, "reclamos"));
       } else {
         console.warn("[Reportes] Error al obtener reclamos:", pReclamos.reason);
         avisos.push(`Reclamos ciudadanos: ${pReclamos.reason?.message || "Servicio temporalmente inaccesible"}`);
@@ -399,7 +373,7 @@ export default function PaginaGestionReportes() {
 
       // Procesar Reportes de Conductores independientemente
       if (pReportes.status === "fulfilled") {
-        fijarReportesConductores(pReportes.value.datos || []);
+        fijarReportesConductores(extraerLista(pReportes.value, "reportes"));
       } else {
         console.warn("[Reportes] Error al obtener reportes:", pReportes.reason);
         avisos.push(`Reportes operativos: ${pReportes.reason?.message || "Servicio temporalmente inaccesible"}`);
@@ -407,7 +381,7 @@ export default function PaginaGestionReportes() {
 
       // Procesar Métricas de Resumen independientemente
       if (pResumen.status === "fulfilled") {
-        fijarMetricas(pResumen.value.datos);
+        fijarMetricas(pResumen.value?.datos || pResumen.value);
       }
 
       if (avisos.length > 0) {
@@ -423,8 +397,9 @@ export default function PaginaGestionReportes() {
   }, []);
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargarTodo();
-  }, [cargarTodo]);
+  }, [isLoaded, cargarTodo]);
 
   // Lista activa según la pestaña
   const itemsActivos = useMemo(() => {

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { autorizar_ciudadano, con_ciudadano_bloqueado } from "@/lib/autorizacion_ciudadana";
 import { consultar_domicilio, preparar_guardado_domicilio, serializar_domicilio } from "@/lib/domicilio_ciudadano";
 import { validarRegistroDomicilio, validarActualizacionDomicilio } from "@/contratos/domicilio";

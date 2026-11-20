@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { clienteFetch } from "@/lib/clienteHttp";
 
 export function BadgePendientesReportes() {
   const [totalPendientes, fijarTotalPendientes] = useState<number | null>(null);
@@ -11,10 +12,8 @@ export function BadgePendientesReportes() {
 
     async function consultarResumen() {
       try {
-        const res = await fetch("/api/reportes/resumen", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelado && data.exito && data.datos?.global) {
+        const data = await clienteFetch("/api/reportes/resumen");
+        if (!cancelado && data && data.exito && data.datos?.global) {
           fijarTotalPendientes(data.datos.global.pendientesTotal);
           fijarTieneCriticos((data.datos.global.criticosOperativos || 0) > 0);
         }

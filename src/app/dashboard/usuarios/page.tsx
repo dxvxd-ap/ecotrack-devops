@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Users,
   Shield,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 
 export default function PaginaGestionUsuariosRoles() {
+  const { isLoaded } = useAuth();
   const [usuarios, fijar_usuarios] = useState<any[]>([]);
   const [roles, fijar_roles] = useState<any[]>([]);
   const [cargando, fijar_cargando] = useState(true);
@@ -47,13 +50,17 @@ export default function PaginaGestionUsuariosRoles() {
   const cargar_datos = async () => {
     try {
       fijar_cargando(true);
-      const [res_usr, res_rol] = await Promise.all([
-        fetch("/api/usuarios").then((r) => r.json()),
-        fetch("/api/roles").then((r) => r.json()),
+      const [res_usr, res_rol] = await Promise.allSettled([
+        clienteFetch("/api/usuarios"),
+        clienteFetch("/api/roles"),
       ]);
 
-      if (res_usr.exito) fijar_usuarios(res_usr.datos || []);
-      if (res_rol.exito) fijar_roles(res_rol.datos || []);
+      if (res_usr.status === "fulfilled") {
+        fijar_usuarios(extraerLista(res_usr.value, "usuarios"));
+      }
+      if (res_rol.status === "fulfilled") {
+        fijar_roles(extraerLista(res_rol.value, "roles"));
+      }
     } catch (e) {
       console.error("Error al cargar usuarios y roles:", e);
     } finally {
@@ -62,8 +69,9 @@ export default function PaginaGestionUsuariosRoles() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_datos();
-  }, []);
+  }, [isLoaded]);
 
   const cambiar_rol_usuario = async (
     id_usuario: string,

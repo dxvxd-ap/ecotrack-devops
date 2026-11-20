@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextResponse, NextRequest } from "next/server";
 import { ModeloPreasignacionUsuario } from "@/modelos/PreasignacionUsuario";
 import { autorizar_administracion, respuesta_error_administrativo, texto_opcional,

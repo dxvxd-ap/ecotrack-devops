@@ -1,3 +1,4 @@
+export const revalidate = 0;
 import { autorizar_ciudadano } from '@/lib/autorizacion_ciudadana';
 import { ErrorCiudadano, leer_json_ciudadano, rechazar_parametros_domicilio,
   respuesta_ciudadana, respuesta_error_ciudadano, validar_origen_ciudadano } from '@/lib/http_ciudadano';

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { autorizar_ciudadano, con_ciudadano_bloqueado } from "@/lib/autorizacion_ciudadana";
 import { ErrorCiudadano, es_conflicto_persistencia, respuesta_ciudadana,
   respuesta_error_ciudadano, validar_origen_ciudadano } from "@/lib/http_ciudadano";

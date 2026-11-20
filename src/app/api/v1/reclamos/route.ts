@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextRequest } from "next/server";
 import { autorizar_reclamos, correo_principal, ErrorAdministrativo } from "@/lib/autorizacion";
 import { conectar_base_datos } from "@/lib/base_datos";

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextResponse, NextRequest } from "next/server";
 import { currentUser } from "@clerk/nextjs/server";
 import { conectar_base_datos } from "@/lib/base_datos";

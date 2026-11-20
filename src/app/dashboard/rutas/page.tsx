@@ -4,6 +4,8 @@ import { puedeEditarGeometria, normalizarRuta } from "@/lib/rutas_mapa";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Map,
   Plus,
@@ -121,6 +123,7 @@ function calcular_distancia_geometria_km(puntos: [number, number][]): number {
 }
 
 export default function PaginaGestionRutas() {
+  const { isLoaded } = useAuth();
   const [rutas, fijar_rutas] = useState<any[]>([]);
   const [cargando, fijar_cargando] = useState(true);
   const [guardando, fijar_guardando] = useState(false);
@@ -192,27 +195,21 @@ export default function PaginaGestionRutas() {
   const cargar_rutas = async () => {
     try {
       fijar_cargando(true);
-      const [respRutas, respCamiones] = await Promise.all([
-        fetch("/api/rutas", {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" },
-        }).then((r) => r.json()),
-        fetch("/api/camiones", {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" },
-        })
-          .then((r) => r.json())
-          .catch(() => ({ exito: false })),
+      const [respRutas, respCamiones] = await Promise.allSettled([
+        clienteFetch("/api/rutas"),
+        clienteFetch("/api/camiones"),
       ]);
 
-      if (respRutas.exito) {
-        const datos_normalizados = (respRutas.datos || [])
+      if (respRutas.status === "fulfilled") {
+        const listaRutas = extraerLista(respRutas.value, "rutas");
+        const datos_normalizados = listaRutas
           .map((r: any) => normalizarRuta(r))
           .filter(Boolean);
         fijar_rutas(datos_normalizados);
       }
-      if (respCamiones.exito) {
-        fijar_camiones_disponibles(respCamiones.datos || []);
+      if (respCamiones.status === "fulfilled") {
+        const listaCamiones = extraerLista(respCamiones.value, "camiones");
+        fijar_camiones_disponibles(listaCamiones);
       }
     } catch (e) {
       console.error("Error al cargar rutas:", e);
@@ -222,8 +219,9 @@ export default function PaginaGestionRutas() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_rutas();
-  }, []);
+  }, [isLoaded]);
 
   const distancia_calculada_km = calcular_distancia_geometria_km(coordenadas_detalle);
 

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { resumenAvisos } from "@/lib/avisos";
 import { autorizar_ciudadano } from "@/lib/autorizacion_ciudadana";
 import { rechazar_parametros_domicilio, respuesta_ciudadana, respuesta_error_ciudadano } from "@/lib/http_ciudadano";

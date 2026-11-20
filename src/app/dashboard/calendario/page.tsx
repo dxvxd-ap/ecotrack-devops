@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Calendar as IconoCalendario,
   Clock,
@@ -23,6 +25,7 @@ import {
 } from "lucide-react";
 
 export default function PaginaCalendarioLogistica() {
+  const { isLoaded } = useAuth();
   const [asignaciones, fijar_asignaciones] = useState<any[]>([]);
   const [camiones, fijar_camiones] = useState<any[]>([]);
   const [rutas, fijar_rutas] = useState<any[]>([]);
@@ -49,13 +52,17 @@ export default function PaginaCalendarioLogistica() {
 
   const cargar_catalogos = async () => {
     try {
-      const [res_cam, res_rut] = await Promise.all([
-        fetch("/api/camiones").then((r) => r.json()),
-        fetch("/api/rutas").then((r) => r.json()),
+      const [res_cam, res_rut] = await Promise.allSettled([
+        clienteFetch("/api/camiones"),
+        clienteFetch("/api/rutas"),
       ]);
 
-      if (res_cam.exito) fijar_camiones(res_cam.datos || []);
-      if (res_rut.exito) fijar_rutas(res_rut.datos || []);
+      if (res_cam.status === "fulfilled") {
+        fijar_camiones(extraerLista(res_cam.value, "camiones"));
+      }
+      if (res_rut.status === "fulfilled") {
+        fijar_rutas(extraerLista(res_rut.value, "rutas"));
+      }
     } catch (e) {
       console.error("Error al cargar catálogos de logística:", e);
     }
@@ -64,11 +71,8 @@ export default function PaginaCalendarioLogistica() {
   const cargar_turnos_fecha = useCallback(async (fecha: string) => {
     try {
       fijar_cargando(true);
-      const res = await fetch(`/api/calendario?fecha=${fecha}`);
-      const data = await res.json();
-      if (data.exito) {
-        fijar_asignaciones(data.datos || []);
-      }
+      const res = await clienteFetch(`/api/calendario?fecha=${fecha}`);
+      fijar_asignaciones(extraerLista(res, "calendario"));
     } catch (e) {
       console.error("Error al cargar turnos para la fecha:", e);
     } finally {
@@ -77,12 +81,14 @@ export default function PaginaCalendarioLogistica() {
   }, []);
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_catalogos();
-  }, []);
+  }, [isLoaded]);
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_turnos_fecha(fecha_activa);
-  }, [fecha_activa, cargar_turnos_fecha]);
+  }, [isLoaded, fecha_activa, cargar_turnos_fecha]);
 
   const cambiar_dia = (delta: number) => {
     const d = new Date(fecha_activa + "T12:00:00");

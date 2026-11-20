@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { autorizar_ciudadano } from "@/lib/autorizacion_ciudadana";
 import { validarOperacionReclamo, ErrorReclamo } from "@/contratos/reclamos";
 import { negociarContratoReclamos, respuestaReclamos, errorReclamos } from "@/lib/http_reclamos";

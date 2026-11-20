@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Bell,
   Send,
@@ -45,6 +47,7 @@ interface Ruta {
 }
 
 function ContenidoAlertas() {
+  const { isLoaded } = useAuth();
   const searchParams = useSearchParams();
 
   // Estados del Formulario
@@ -71,16 +74,16 @@ function ContenidoAlertas() {
   const cargarDatos = async () => {
     try {
       fijarCargandoHistorial(true);
-      const [resRutas, resAlertas] = await Promise.all([
-        fetch("/api/rutas", { cache: "no-store", headers: { "Cache-Control": "no-cache" } }).then((r) => r.json()),
-        fetch("/api/alertas?limite=50", { cache: "no-store", headers: { "Cache-Control": "no-cache" } }).then((r) => r.json()),
+      const [resRutas, resAlertas] = await Promise.allSettled([
+        clienteFetch("/api/rutas"),
+        clienteFetch("/api/alertas?limite=50"),
       ]);
 
-      if (resRutas.exito) {
-        fijarRutas(resRutas.datos || []);
+      if (resRutas.status === "fulfilled") {
+        fijarRutas(extraerLista(resRutas.value, "rutas"));
       }
-      if (resAlertas.exito) {
-        fijarHistorial(resAlertas.datos || []);
+      if (resAlertas.status === "fulfilled") {
+        fijarHistorial(extraerLista(resAlertas.value, "alertas"));
       }
     } catch (e) {
       console.error("Error al cargar datos de alertas:", e);
@@ -90,8 +93,9 @@ function ContenidoAlertas() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargarDatos();
-  }, []);
+  }, [isLoaded]);
 
   // Prellenar si viene desde un atajo (Query Params de Reportes)
   useEffect(() => {

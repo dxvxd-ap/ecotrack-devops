@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { identificador, invalido } from "@/contratos/avisos";
 import { marcarLectura } from "@/lib/avisos";
 import { autorizar_ciudadano } from "@/lib/autorizacion_ciudadana";

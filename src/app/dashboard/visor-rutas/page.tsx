@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Layers,
   MapPin,
@@ -28,6 +30,7 @@ const VisorCartografico = dynamic(
 );
 
 export default function PaginaVisorRutas() {
+  const { isLoaded } = useAuth();
   const [rutas, fijar_rutas] = useState<any[]>([]);
   const [cargando, fijar_cargando] = useState(true);
   const [ruta_seleccionada_id, fijar_ruta_seleccionada_id] = useState<string | null>(null);
@@ -36,11 +39,9 @@ export default function PaginaVisorRutas() {
   const cargar_rutas = async () => {
     try {
       fijar_cargando(true);
-      const res = await fetch("/api/rutas");
-      const data = await res.json();
-      if (data.exito) {
-        fijar_rutas(data.datos || []);
-      }
+      const res = await clienteFetch("/api/rutas");
+      const lista = extraerLista(res, "rutas");
+      fijar_rutas(lista);
     } catch (e) {
       console.error("Error al cargar rutas:", e);
     } finally {
@@ -49,8 +50,9 @@ export default function PaginaVisorRutas() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_rutas();
-  }, []);
+  }, [isLoaded]);
 
   const rutas_filtradas = rutas.filter((r) => {
     if (!r) return false;

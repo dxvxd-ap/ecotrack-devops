@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Skeleton from "react-loading-skeleton";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import {
   Truck,
   UserCheck,
@@ -18,6 +20,7 @@ import {
 } from "lucide-react";
 
 export default function PaginaGestionFlota() {
+  const { isLoaded } = useAuth();
   const [camiones, fijar_camiones] = useState<any[]>([]);
   const [conductores, fijar_conductores] = useState<any[]>([]);
   const [cargando, fijar_cargando] = useState(true);
@@ -67,18 +70,22 @@ export default function PaginaGestionFlota() {
   const cargar_datos = async () => {
     try {
       fijar_cargando(true);
-      const [res_cam, res_cond] = await Promise.all([
-        fetch("/api/camiones").then((r) => r.json()),
-        fetch("/api/conductores").then((r) => r.json()),
+      const [res_cam, res_cond] = await Promise.allSettled([
+        clienteFetch("/api/camiones"),
+        clienteFetch("/api/conductores"),
       ]);
 
-      if (res_cam.exito) {
-        fijar_camiones(res_cam.datos || []);
-        if (res_cam.datos?.length > 0 && !telemetria.camion_id) {
-          fijar_telemetria((prev) => ({ ...prev, camion_id: res_cam.datos[0]._id }));
+      if (res_cam.status === "fulfilled") {
+        const camiones = extraerLista(res_cam.value, "camiones");
+        fijar_camiones(camiones);
+        if (camiones.length > 0 && !telemetria.camion_id) {
+          fijar_telemetria((prev) => ({ ...prev, camion_id: camiones[0]._id }));
         }
       }
-      if (res_cond.exito) fijar_conductores(res_cond.datos || []);
+      if (res_cond.status === "fulfilled") {
+        const conductores = extraerLista(res_cond.value, "conductores");
+        fijar_conductores(conductores);
+      }
     } catch (e) {
       console.error("Error al cargar flota:", e);
     } finally {
@@ -87,8 +94,9 @@ export default function PaginaGestionFlota() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargar_datos();
-  }, []);
+  }, [isLoaded]);
 
   const abrir_edicion = (c: any) => {
     fijar_camion_a_editar(c);

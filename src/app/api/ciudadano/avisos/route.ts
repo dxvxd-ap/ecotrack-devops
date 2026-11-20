@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { consulta } from "@/contratos/avisos";
 import { listarAvisos } from "@/lib/avisos";
 import { autorizar_ciudadano } from "@/lib/autorizacion_ciudadana";

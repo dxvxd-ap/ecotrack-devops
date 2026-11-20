@@ -25,6 +25,8 @@ import {
   WifiOff,
   Zap,
 } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
+import { clienteFetch, extraerLista } from "@/lib/clienteHttp";
 import { useRastreoWebSocket, TelemetriaEnVivo } from "@/lib/useRastreoWebSocket";
 
 // Carga dinámica SSR-safe del mapa Leaflet
@@ -47,6 +49,7 @@ const MapaMonitoreoFlota = dynamic(
 );
 
 export default function PaginaRastreoEnVivo() {
+  const { isLoaded } = useAuth();
   const [camiones, fijar_camiones] = useState<any[]>([]);
   const [rutas, fijar_rutas] = useState<any[]>([]);
   const [cargando, fijar_cargando] = useState(true);
@@ -73,19 +76,17 @@ export default function PaginaRastreoEnVivo() {
       fijar_cargando(true);
       fijar_errorCarga(null);
 
-      const [resCamiones, resRutas] = await Promise.all([
-        fetch("/api/camiones").then((r) => r.json()),
-        fetch("/api/rutas").then((r) => r.json()),
+      const [resCamiones, resRutas] = await Promise.allSettled([
+        clienteFetch("/api/camiones"),
+        clienteFetch("/api/rutas"),
       ]);
 
-      if (resCamiones.exito) {
-        fijar_camiones(resCamiones.datos || []);
-      } else {
-        fijar_camiones(resCamiones.datos || []);
+      if (resCamiones.status === "fulfilled") {
+        fijar_camiones(extraerLista(resCamiones.value, "camiones"));
       }
 
-      if (resRutas.exito) {
-        fijar_rutas(resRutas.datos || []);
+      if (resRutas.status === "fulfilled") {
+        fijar_rutas(extraerLista(resRutas.value, "rutas"));
       }
     } catch (err: any) {
       console.error("Error al cargar datos de flota/rutas:", err);
@@ -96,8 +97,9 @@ export default function PaginaRastreoEnVivo() {
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     cargarDatos();
-  }, []);
+  }, [isLoaded]);
 
   // Calcular métricas en tiempo real combinando camiones con telemetría viva
   const {
